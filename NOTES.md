@@ -194,3 +194,10 @@ yaml 2.9.1 (dev, for the Docker config test); Docker image `node:22.23.4-bookwor
 ## 2026-11-02: Slice 1a.4 added (JCCJ)
 
 - **Add-bots button on the host page** becomes slice **1a.4** of stage 1a, done in its own session (plan mode, tests first) **before security audit 1**, so the audit covers it. The server will start and stop bots itself through a new host-only command; details are planned in that session. Until then: `npm run bots -- --code ABCD --count N`.
+
+## 2026-11-02: Trial game, JCCJ + 7 bots (log `logs/2026-11-02T17-42-22.873Z_LNQD.jsonl`)
+
+- Players: J + Bot 1–7, normal rules. **7 min 0 s**, reached **wave 11** (waves 1–10 cleared), **885 kills**, **nobody downed**. Ended by the host going back to the lobby (`aborted`), not by a wipe.
+- Server: tick p95 0.55 ms + patch 0.8 ms over the run (worst 10 s window 0.85 ms); worst tick 3.3 ms. Peak 47 enemies on the field, so the 120 cap was not reached. Heap 23–27 MB; RSS 111 → 122 MB.
+- Bandwidth: 10.0 kB/s per client on average, peak 18.7 kB/s (lower than the load test's 43 kB/s at 120 enemies).
+- Not yet the 10-minute acceptance run (7 minutes). Observations: 8 players clear waves 1–11 with no downs, so endless waves may be too easy for a full team early on; tuning is for 1e (and the bots do not dodge).
