@@ -1,0 +1,45 @@
+{
+  "generatedBy": "tools/assets.mjs",
+  "models": {
+    "Mage.glb": {
+      "source": "adventurers/Mage.glb",
+      "sourceBytes": 3589240,
+      "bytes": 138724,
+      "clips": []
+    },
+    "hero-anims.glb": {
+      "source": "adventurers/Mage.glb",
+      "sourceBytes": 3589240,
+      "bytes": 320656,
+      "clips": [
+        "Death_A",
+        "Hit_A",
+        "Idle",
+        "Lie_Down",
+        "Lie_Idle",
+        "Lie_StandUp",
+        "Running_A",
+        "Spellcast_Shoot"
+      ]
+    },
+    "Skeleton_Minion.glb": {
+      "source": "skeletons/Skeleton_Minion.glb",
+      "sourceBytes": 4814296,
+      "bytes": 143268,
+      "clips": []
+    },
+    "skeleton-anims.glb": {
+      "source": "skeletons/Skeleton_Minion.glb",
+      "sourceBytes": 4814296,
+      "bytes": 261512,
+      "clips": [
+        "1H_Melee_Attack_Chop",
+        "Death_A",
+        "Hit_A",
+        "Idle_Combat",
+        "Spawn_Ground_Skeletons",
+        "Walking_D_Skeletons"
+      ]
+    }
+  }
+}

@@ -106,6 +106,28 @@ export const TUNING = {
     /** Extra connections allowed beyond the players (host pages). */
     maxHostConnections: 4,
   },
+
+  client: {
+    /** Remote entities render this far behind the newest snapshot (ms). */
+    interpDelayMs: 100,
+    /** Snapshots kept per entity for interpolation. */
+    snapshotBuffer: 8,
+    /** Unacknowledged inputs kept for prediction replay. */
+    pendingInputCap: 64,
+    /** Prediction errors above this snap instead of smoothing (m). */
+    snapDistance: 2,
+    /** Time constant of the prediction error smoothing (s). */
+    smoothingSec: 0.1,
+    /** Retry interval on the join screen (run in progress, host unreachable) (ms). */
+    joinRetryMs: 5000,
+    /** A killed enemy stays visible this long for its death animation (s). */
+    deathAnimSec: 3,
+    /** Extra enemy views beyond the enemy cap, for enemies still playing their death. */
+    deathViewSlack: 40,
+    /** Camera offset from the followed hero (look test). */
+    cameraOffset: { x: 0, y: 17, z: 12.5 },
+    cameraFov: 42,
+  },
 };
 
 export type Tuning = typeof TUNING;

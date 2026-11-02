@@ -2,6 +2,9 @@
 
 export const ROOM_NAME = 'hold';
 
+/** Letters used in room codes (4 letters, no I or O to avoid confusion with 1 and 0). */
+export const ROOM_CODE_LETTERS = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
+
 export type HeroStatus = 'standing' | 'downed' | 'dead';
 export type Phase = 'lobby' | 'running' | 'ended';
 export type WaveState = 'spawning' | 'break';

@@ -4,3 +4,4 @@ assets
 package-lock.json
 BRIEF.md
 CLAUDE.md
+client/public/models/

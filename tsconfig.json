@@ -15,5 +15,13 @@
     "skipLibCheck": true,
     "types": ["node"]
   },
-  "include": ["shared", "server/src", "tests", "tools", "vitest.config.ts", "eslint.config.js"]
+  "include": [
+    "shared",
+    "server/src",
+    "tests",
+    "tools",
+    "vitest.config.ts",
+    "eslint.config.js",
+    "playwright.config.ts"
+  ]
 }

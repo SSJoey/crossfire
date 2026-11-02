@@ -11,6 +11,7 @@ import {
   CLOSE,
   JOIN_ERRORS,
   MSG,
+  ROOM_CODE_LETTERS,
   SERVER_MSG,
   type Phase,
   type RunEndedMessage,
@@ -38,7 +39,6 @@ export interface NetStats {
   unknown: number;
 }
 
-const ROOM_CODE_LETTERS = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
 const CODES_CHANNEL = '$holdcodes';
 
 function now(): number {

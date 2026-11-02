@@ -74,3 +74,57 @@ Every answer to an open question and every deviation from BRIEF.md, dated.
 10. WebSocket max message size 16 KB.
 11. The server drops simulation backlog after 5 catch-up steps (a stall never makes it fast-forward).
 12. Synced state allocates one schema object per spawned enemy and bolt (the simulation itself is pooled). Measure in the 1a.3 load test; pool the schema objects if it shows up.
+
+## 2026-11-02: Slice 1a.2 planning (answers from JCCJ)
+
+1. **KayKit source files** come from the official CC0 GitHub repos, pinned by commit (neither repo has releases):
+   - Adventurers 1.0: `KayKit-Game-Assets/KayKit-Character-Pack-Adventures-1.0` @ `672074b73ba276876a19e8816ecdc5241817ab47`
+   - Skeletons 1.0: `KayKit-Game-Assets/KayKit-Character-Pack-Skeletons-1.0` @ `15b62b9bad122f72926c10fb14d622c73819fa54`
+   - `npm run fetch-assets` downloads the character GLBs + LICENSE into `assets/kaykit/` (33 MB, git-ignored). `npm run assets` writes the slimmed models to `client/public/models/`, which **are committed**, so a fresh clone builds without downloading.
+2. **Own hero in 1a**: the camera follows your hero and only your hero has a gold "you" ground ring. Downed and dead heroes get a pulsing red ring with a revive progress arc. No name tags until 1f.
+3. **Graphics tier**: High / Medium / Low select on the join screen, default Medium, remembered in localStorage; `?gfx=high|medium|low` overrides it.
+4. **Prediction is client-only** (no server change). The client sends one input per server tick (50 ms), predicts its own hero with the shared `stepHero`, replays unacknowledged inputs on each snapshot and smooths the leftover error (time constant 100 ms); errors over 2 m snap. Facing is predicted from the aim point.
+5. **Serving**: in production the game server also serves the built client (`client/dist`) on its own port: players use `http://<lan-ip>:2567/?code=ABCD`, the host page is `http://localhost:2567/host`. In development, Vite serves the client (port 5173, all interfaces) and the client talks to the game server on port 2567 directly. `GET /api/lan` lists the host's private IPv4 addresses (env `LAN_HOST` overrides; for Docker in 1a.3).
+
+### Versions (npm registry, 2026-11-02)
+
+three 0.187.0 (+ @types/three 0.187.0), vite 8.3.5, @colyseus/sdk 0.18.9 (client), qrcode 1.5.4 (+ @types/qrcode 1.5.6), express 5.3.0 (+ @types/express 5.0.6; peer dependency of @colyseus/core, mounted with `defineServer({ express })`), @gltf-transform/core, functions and extensions 4.5.1, meshoptimizer 1.3.0, @playwright/test 1.64.1.
+
+### KayKit rigs and clips (checked in the files)
+
+- Heroes and skeletons share the same 41-bone rig (same bone names). The pipeline still keeps one animation file per pack (`hero-anims.glb`, `skeleton-anims.glb`), because several skeleton clips exist only in the skeleton files.
+- Hero clips kept: Idle, Running_A, Spellcast_Shoot, Hit_A, Lie_Down, Lie_Idle, Lie_StandUp, Death_A.
+- Skeleton clips kept: Spawn_Ground_Skeletons, Walking_D_Skeletons, Idle_Combat, 1H_Melee_Attack_Chop, Hit_A, Death_A.
+
+## 2026-11-02: Slice 1a.2 build notes
+
+### How to run
+
+- `npm run fetch-assets` (once, downloads KayKit sources), `npm run assets` (rebuilds `client/public/models/`).
+- `npm run dev`: game server on 2567 + Vite on 5173 (all interfaces). Host page: `http://localhost:5173/host`. Colyseus answers cross-origin matchmaking requests from 5173 (checked).
+- `npm run build && npm run server`: production, everything on 2567. Host page: `http://localhost:2567/host`.
+- `npm run test:e2e`: Playwright smoke (Chromium only; first time: `npx playwright install chromium`).
+
+### Implementation choices (not in the brief; for review)
+
+1. Client tunables (interpolation delay 100 ms, snap 2 m, smoothing 0.1 s, join retry 5 s, death animation 3 s, camera offset/fov) live in `TUNING.client`.
+2. `ROOM_CODE_LETTERS` moved from `HoldRoom.ts` to `shared/types.ts` so the join screen validates codes with the same alphabet.
+3. **Shadows per tier**: on Medium and High the arena and heroes cast shadows; **enemies cast shadows on High only** (as in the look test), to keep 120 skeletons affordable on Medium.
+4. **No web fonts**: system fonts with the look-test fonts as first choice if installed, because a game-night LAN may have no internet.
+5. three.js 0.187 removed `PCFSoftShadowMap`; the client uses `PCFShadowMap`.
+6. `window.__crossfire` exposes a read-only `{ phase, me: { x, z, status } }` for the Playwright test. It controls nothing.
+7. Arena in 1a: ground, dirt, red outside zone, orange ring edge, hold platform + brazier. Torches, ruins, rocks, trees and the flag wait for the art pass (1g).
+8. The Mage keeps all its KayKit props (staff, wand, spellbook, hat), as in the look test.
+9. An enemy that disappears from the synced state during a run is treated as killed (death animation, then it sinks). The server removes enemies only when they die or the run resets.
+10. The hero cast animation plays when a new bolt appears within 1.5 m of a hero (the server sends no attack event). The hero `Hit_A` clip is in the pipeline but not played yet (heroes are hit constantly; the red vignette and HP bar show damage).
+11. Inputs are sent from the render loop, so a hidden tab stops sending; the server's 250 ms stale rule then makes that hero stand still. Window blur also releases all keys.
+12. The host page shows a network address dropdown only when the machine has more than one private IPv4 address (e.g. a Docker bridge). Reloading the host page opens a new room with a new code.
+13. "Back to lobby" on the host page works during a run too (it ends the run for everyone).
+14. The name field accepts up to 64 characters; the server trims to 16 grapheme clusters as before.
+
+### Performance notes for the 1a.3 load test
+
+- Models: 8.2 MB of sources → 850 KB total (Mage 135 KB, Minion 140 KB, hero clips 313 KB, skeleton clips 255 KB), meshopt-compressed.
+- gltf-transform's `join` does not merge skinned meshes, so a Minion is still **9 draw calls** (the Mage 10). With 120 enemies that is about 1,100 draw calls before shadows. If the Medium/Low fps targets are missed, the first fix is a custom merge of the skinned body parts in `tools/assets.mjs` (they share one skin and, apart from the eye glow, one material).
+- Client bundle 920 KB minified (250 KB gzip), almost all three.js. Fine on a LAN; Vite's 500 KB warning is expected.
+- One mixer per enemy (120 mixers at the cap). Animation LOD is a candidate if the CPU budget is missed.

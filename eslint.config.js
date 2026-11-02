@@ -21,5 +21,9 @@ export default tseslint.config(
       ],
     },
   },
+  {
+    files: ['client/src/**/*.ts', 'tests/e2e/**/*.ts'],
+    languageOptions: { globals: { ...globals.browser } },
+  },
   prettier,
 );
