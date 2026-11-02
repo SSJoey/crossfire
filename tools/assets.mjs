@@ -1,5 +1,6 @@
 // Slims the KayKit source models for the browser (run `npm run fetch-assets` first).
-// - Character files keep mesh + skeleton, no clips.
+// - Character files keep mesh + skeleton, no clips, merged into one skinned mesh
+//   (one draw call per material, see merge-skinned.mjs).
 // - Each rig gets one shared animation file with only the clips the game plays.
 // - Geometry and animation data are compressed with EXT_meshopt_compression.
 // Writes client/public/models/*.glb and manifest.json (committed).
@@ -9,8 +10,9 @@ import { basename, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { NodeIO } from '@gltf-transform/core';
 import { ALL_EXTENSIONS } from '@gltf-transform/extensions';
-import { dedup, join as joinPrimitives, meshopt, prune, resample, weld } from '@gltf-transform/functions';
+import { dedup, meshopt, prune, resample, weld } from '@gltf-transform/functions';
 import { MeshoptDecoder, MeshoptEncoder } from 'meshoptimizer';
+import { mergeSkinnedParts } from './merge-skinned.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const SRC = join(ROOT, 'assets', 'kaykit');
@@ -73,11 +75,14 @@ async function main() {
     const doc = await io.read(srcPath);
     const root = doc.getRoot();
 
+    let merge;
     if (job.kind === 'character') {
       for (const a of root.listAnimations()) disposeClip(a);
       disposeOrphanAccessors(root);
-      // Body parts share one skin and material: joining them cuts draw calls per unit.
-      await doc.transform(prune(), dedup(), weld(), joinPrimitives({ keepNamed: false }));
+      await doc.transform(prune(), dedup());
+      // Body parts and bone-attached props become one skinned mesh: fewer draw calls per unit.
+      merge = mergeSkinnedParts(doc, basename(job.out, '.glb'));
+      await doc.transform(prune(), weld());
     } else {
       const have = new Set(root.listAnimations().map((a) => a.getName()));
       const missing = job.clips.filter((c) => !have.has(c));
@@ -95,6 +100,11 @@ async function main() {
     // One quantization volume for the whole character keeps a single shared skin.
     const volume = job.kind === 'character' ? 'scene' : 'mesh';
     await doc.transform(meshopt({ encoder: MeshoptEncoder, level: 'medium', quantizationVolume: volume }));
+    // Quantization gives the mesh an adjusted copy of its skin; drop the unused original.
+    for (const s of root.listSkins()) {
+      if (s.listParents().every((p) => p.propertyType === 'Root')) s.dispose();
+    }
+    disposeOrphanAccessors(root);
 
     const outPath = join(OUT, job.out);
     await io.write(outPath, doc);
@@ -104,10 +114,11 @@ async function main() {
       sourceBytes: statSync(srcPath).size,
       bytes: statSync(outPath).size,
       clips,
+      ...(merge ? { merge } : {}),
     };
     const kb = (n) => `${(n / 1024).toFixed(0)} KB`;
     console.log(
-      `${basename(outPath).padEnd(20)} ${kb(statSync(srcPath).size).padStart(8)} -> ${kb(statSync(outPath).size).padStart(7)}  ${clips.length} clips`,
+      `${basename(outPath).padEnd(20)} ${kb(statSync(srcPath).size).padStart(8)} -> ${kb(statSync(outPath).size).padStart(7)}  ${clips.length} clips${merge ? `, ${merge.partsBefore} parts -> ${merge.drawCallsAfter} draw call(s)` : ''}`,
     );
   }
   await writeFile(join(OUT, 'manifest.json'), JSON.stringify(manifest, null, 2) + '\n');

@@ -12,8 +12,28 @@ import { HERO_CLIPS, MODEL_FILES, SKELETON_CLIPS } from '../../../client/src/ren
  */
 const OUT = join(import.meta.dirname, '../../../client/public/models');
 
+type Box = [number[], number[]];
+
 interface Manifest {
-  models: Record<string, { source: string; sourceBytes: number; bytes: number; clips: string[] }>;
+  models: Record<
+    string,
+    {
+      source: string;
+      sourceBytes: number;
+      bytes: number;
+      clips: string[];
+      /** Character files only: what the body-part merge did. */
+      merge?: {
+        partsBefore: number;
+        drawCallsAfter: number;
+        trianglesBefore: number;
+        trianglesAfter: number;
+        /** Bind-pose bounds of the whole character before and after merging. */
+        boxBefore: Box;
+        boxAfter: Box;
+      };
+    }
+  >;
 }
 
 let io: NodeIO;
@@ -42,6 +62,54 @@ describe('KayKit asset pipeline output', () => {
       expect(root.listMeshes().length, f).toBeGreaterThan(0);
       expect(root.listSkins().length, f).toBe(1);
       expect(root.listAnimations().length, f).toBe(0);
+    }
+  });
+
+  it('each character is one skinned mesh with one draw call per material', async () => {
+    const limits: [string, number][] = [
+      [MODEL_FILES.hero, 1],
+      [MODEL_FILES.minion, 2],
+    ];
+    for (const [f, maxDrawCalls] of limits) {
+      const root = (await read(f)).getRoot();
+      const meshNodes = root.listNodes().filter((n) => n.getMesh());
+      expect(meshNodes.length, f).toBe(1);
+      expect(meshNodes[0]!.getSkin(), f).toBeTruthy();
+      const prims = meshNodes[0]!.getMesh()!.listPrimitives();
+      expect(prims.length, f).toBeLessThanOrEqual(maxDrawCalls);
+      const mats = new Set(prims.map((p) => p.getMaterial()));
+      expect(mats.size, f).toBe(prims.length);
+      expect(manifest.models[f]!.merge!.drawCallsAfter, f).toBe(prims.length);
+    }
+  });
+
+  it('the merge keeps every triangle and the same bind-pose shape', () => {
+    for (const f of [MODEL_FILES.hero, MODEL_FILES.minion]) {
+      const m = manifest.models[f]!.merge!;
+      expect(m.partsBefore, f).toBeGreaterThan(m.drawCallsAfter);
+      expect(m.trianglesAfter, f).toBe(m.trianglesBefore);
+      for (let k = 0; k < 2; k++)
+        for (let a = 0; a < 3; a++)
+          expect(m.boxAfter[k]![a]!, `${f} box`).toBeCloseTo(m.boxBefore[k]![a]!, 3);
+    }
+  });
+
+  it('every vertex is bound to a real joint with weights summing to 1', async () => {
+    for (const f of [MODEL_FILES.hero, MODEL_FILES.minion]) {
+      const root = (await read(f)).getRoot();
+      const joints = root.listSkins()[0]!.listJoints().length;
+      const prim = root.listMeshes()[0]!.listPrimitives()[0]!;
+      const J = prim.getAttribute('JOINTS_0')!;
+      const W = prim.getAttribute('WEIGHTS_0')!;
+      const j: number[] = [];
+      const w: number[] = [];
+      for (let i = 0; i < J.getCount(); i++) {
+        J.getElement(i, j);
+        W.getElement(i, w);
+        const sum = w.reduce((s, x) => s + x, 0);
+        expect(Math.abs(sum - 1), `${f} vertex ${i} weights`).toBeLessThan(0.02);
+        for (let c = 0; c < 4; c++) if (w[c]! > 0) expect(j[c]!, `${f} vertex ${i}`).toBeLessThan(joints);
+      }
     }
   });
 

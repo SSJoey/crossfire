@@ -4,8 +4,38 @@
     "Mage.glb": {
       "source": "adventurers/Mage.glb",
       "sourceBytes": 3589240,
-      "bytes": 138724,
-      "clips": []
+      "bytes": 112992,
+      "clips": [],
+      "merge": {
+        "partsBefore": 12,
+        "drawCallsAfter": 1,
+        "trianglesBefore": 5683,
+        "trianglesAfter": 5683,
+        "boxBefore": [
+          [
+            -1.1285,
+            -0.00003,
+            -1.01715
+          ],
+          [
+            1.29722,
+            2.71565,
+            1.25425
+          ]
+        ],
+        "boxAfter": [
+          [
+            -1.1285,
+            -0.00003,
+            -1.01715
+          ],
+          [
+            1.29722,
+            2.71565,
+            1.25425
+          ]
+        ]
+      }
     },
     "hero-anims.glb": {
       "source": "adventurers/Mage.glb",
@@ -25,8 +55,38 @@
     "Skeleton_Minion.glb": {
       "source": "skeletons/Skeleton_Minion.glb",
       "sourceBytes": 4814296,
-      "bytes": 143268,
-      "clips": []
+      "bytes": 112656,
+      "clips": [],
+      "merge": {
+        "partsBefore": 9,
+        "drawCallsAfter": 2,
+        "trianglesBefore": 5288,
+        "trianglesAfter": 5288,
+        "boxBefore": [
+          [
+            -0.96909,
+            -0.00003,
+            -0.45842
+          ],
+          [
+            0.96909,
+            2.16609,
+            0.45381
+          ]
+        ],
+        "boxAfter": [
+          [
+            -0.96909,
+            -0.00003,
+            -0.45842
+          ],
+          [
+            0.96909,
+            2.16609,
+            0.45381
+          ]
+        ]
+      }
     },
     "skeleton-anims.glb": {
       "source": "skeletons/Skeleton_Minion.glb",

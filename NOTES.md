@@ -124,7 +124,14 @@ three 0.187.0 (+ @types/three 0.187.0), vite 8.3.5, @colyseus/sdk 0.18.9 (client
 
 ### Performance notes for the 1a.3 load test
 
-- Models: 8.2 MB of sources → 850 KB total (Mage 135 KB, Minion 140 KB, hero clips 313 KB, skeleton clips 255 KB), meshopt-compressed.
-- gltf-transform's `join` does not merge skinned meshes, so a Minion is still **9 draw calls** (the Mage 10). With 120 enemies that is about 1,100 draw calls before shadows. If the Medium/Low fps targets are missed, the first fix is a custom merge of the skinned body parts in `tools/assets.mjs` (they share one skin and, apart from the eye glow, one material).
+- Models: 8.2 MB of sources → 850 KB total (Mage 135 KB, Minion 140 KB, hero clips 313 KB, skeleton clips 255 KB), meshopt-compressed. (Superseded by the body-part merge below.)
 - Client bundle 920 KB minified (250 KB gzip), almost all three.js. Fine on a LAN; Vite's 500 KB warning is expected.
 - One mixer per enemy (120 mixers at the cap). Animation LOD is a candidate if the CPU budget is missed.
+
+## 2026-11-02: Body-part merge (after the 1a.2 commit, agreed with JCCJ)
+
+- `tools/merge-skinned.mjs` merges each character into **one skinned mesh with one primitive per material**: Mage 12 parts → **1 draw call**, Skeleton Minion 9 parts → **2** (bone material + eye glow). At the enemy cap that is about 250 draw calls instead of about 1,100.
+- Skinned parts keep their joints and weights. Rigid props on bones (hat on `head`, cape on `chest`, staff and wand on `handslot.r`, both spellbooks on `handslot.l`) are bound to their bone with weight 1, vertices moved into bind space (three.js convention: bind matrix = mesh node world matrix).
+- Checks: triangle counts equal before and after (Mage 5,683, Minion 5,288); bind-pose bounds equal to 5 decimals, both computed by skinning every vertex at rest; one skin per file; every weight set sums to 1 on a valid joint. Screenshots of idle, running and downed heroes show the props following their bones.
+- Meshopt quantization gives the mesh an adjusted copy of its skin; the pipeline disposes the unused original.
+- Character files are now 110 KB each (were 135 and 140 KB). Total model set about 790 KB.
