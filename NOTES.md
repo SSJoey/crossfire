@@ -190,3 +190,7 @@ yaml 2.9.1 (dev, for the Docker config test); Docker image `node:22.23.4-bookwor
 ### Open items from the first trial (2026-11-02, JCCJ: 1 player, no bots, trackpad)
 
 - **Trackpad: no aiming or shooting while moving.** Likely cause: Ubuntu's "Disable touchpad while typing" (`org.gnome.desktop.peripherals.touchpad disable-while-typing` is `true` on the reference laptop). It blocks every trackpad event while a key is held, so the browser never sees them. The input code has no such rule. **To confirm** by turning the setting off. Options put to JCCJ: (1) a join-screen hint + game-night checklist + recommend a mouse; (2) a keyboard auto-fire toggle (new control: parked or 1f); (3) nothing in the game. Decision pending.
+
+## 2026-11-02: Slice 1a.4 added (JCCJ)
+
+- **Add-bots button on the host page** becomes slice **1a.4** of stage 1a, done in its own session (plan mode, tests first) **before security audit 1**, so the audit covers it. The server will start and stop bots itself through a new host-only command; details are planned in that session. Until then: `npm run bots -- --code ABCD --count N`.
