@@ -107,6 +107,30 @@ export const TUNING = {
     maxHostConnections: 4,
   },
 
+  log: {
+    /** A perf line (tick time, memory, bandwidth) is written to the match log this often. */
+    perfIntervalSec: 10,
+  },
+
+  /** The test-only load room (CROSSFIRE_LOAD_ROOM=1). Never used in a real game. */
+  loadTest: {
+    /** Wave size so large that the spawner never runs out: the field stays at the cap. */
+    waveBase: 1_000_000,
+    /** Budget: sim tick + state patch, 95th percentile over the run (ms). */
+    tickBudgetMs: 10,
+    /** Samples before this are warm-up and ignored for memory and load (s). */
+    warmupSec: 120,
+    /** Memory: median of the last `lateSec` vs the median from warm-up to `earlyEndSec`. */
+    earlyEndSec: 300,
+    lateSec: 180,
+    memoryGrowthFactor: 1.1,
+    memorySlackMB: 5,
+    /** Load held: enemies ≥ this share of the cap ... */
+    loadShare: 0.95,
+    /** ... in at least this share of the samples. */
+    loadSampleShare: 0.9,
+  },
+
   client: {
     /** Remote entities render this far behind the newest snapshot (ms). */
     interpDelayMs: 100,

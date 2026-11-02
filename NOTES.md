@@ -136,3 +136,57 @@ three 0.187.0 (+ @types/three 0.187.0), vite 8.3.5, @colyseus/sdk 0.18.9 (client
 - Meshopt quantization gives the mesh an adjusted copy of its skin; the pipeline disposes the unused original.
 - Character files are now 110 KB each (were 135 and 140 KB). Total model set about 790 KB.
 - **Ember holds only the staff** (JCCJ, 2026-11-02): the pipeline drops the Mage's `1H_Wand`, `Spellbook` and `Spellbook_open` before merging (734 triangles). The hat and cape stay. This differs from the look test, which showed every prop. Mage is now 4,949 triangles and 98 KB.
+
+## 2026-11-02: Slice 1a.3 planning (answers from JCCJ)
+
+1. **Load test uses a test-only load room** (`hold_load`): heroes take no damage, the spawner keeps enemies at the cap, bots shoot normally. It is registered only when the server runs with `CROSSFIRE_LOAD_ROOM=1`; Docker never sets it.
+2. **One match log file per run**: from start until the team wipes, the host goes back to the lobby, or everyone leaves.
+3. **Docker uses `network_mode: host`**, so the host's browser still arrives as 127.0.0.1 for the host check and `/api/lan` sees the real LAN addresses. Linux only.
+4. **Security audit 1: prepared here, run elsewhere.** This session writes the checklist and the prompt (`audits/audit-1.md`); the audit runs in a fresh session with no build context, as BRIEF.md says.
+5. **Memory rule ("no steady growth")**: heap and RSS sampled every 10 s; pass if the median of the last 3 minutes is at most 1.10 × the median of minutes 2–5, plus 5 MB.
+6. **FPS** is read from a `?fps=1` overlay in the client (off by default).
+7. **10-minute acceptance run**: 1 player + 7 bots on normal rules; if the team wipes, the host restarts; the check is 10 minutes of total play with no visible desync.
+8. **Perf samples go into every match log**, every 10 s (tick p95/max, heap, RSS, enemies, bolts, kB/s per client by name).
+
+## 2026-11-02: Slice 1a.3 build notes
+
+### How to run
+
+- `npm run bots -- --code ABCD [--count 7] [--url http://127.0.0.1:2567]`: headless bots join the lobby, get ready by themselves (again 1 s after every return to the lobby) and play until Ctrl+C.
+- `npm run load-test -- [--minutes 15] [--bots 8] [--cap 120]`: starts its own server on port 2597 with the load room, runs, then prints a PASS/FAIL table from the run's match log (`logs/load/`). `--bots 7` leaves a slot: the script prints a join link with `?fps=1`; it waits until everyone is ready. `--cap 80` for the High-tier fps check. For the in-browser fps check, run `npm run build` first so the test server serves the client.
+- `?fps=1` on the join link shows fps (last second), 1% low, enemy count and tier in the top-left corner.
+- Docker: `npm run docker:up` (`docker compose up -d --build`), `npm run docker:down`. Host page `http://localhost:2567/host`. Logs in `./logs`.
+
+### Versions (npm registry and Docker Hub, 2026-11-02)
+
+yaml 2.9.1 (dev, for the Docker config test); Docker image `node:22.23.4-bookworm-slim` (exact tag). `tsx` 4.23.15 moved from the root dev dependencies to `server` dependencies, because the container runs the server with it.
+
+### Implementation choices (not in the brief; for review)
+
+1. **Match log lines**: `start` (ISO time, code, seed, names), `waveStarted`/`waveCleared`, `downed`/`died`/`revived` (name), `left` (name, reason `left`/`kicked`/`flooded`), `perf` every 10 s, `end` (reason `wiped`/`aborted`/`empty`, wave, duration, kills, whole-run tick and patch p95). Every line starts with `t` (ms since the run started) and `ev`. File: `logs/<ISO start time>_<CODE>.jsonl`. No IPs or session ids.
+2. **Tick time** is measured in two parts: the simulation step + state mirroring (`tickP95Ms`) and Colyseus' state encode + send (`patchP95Ms`, by timing `broadcastPatch()`). The load-test budget check uses **their sum** against 10 ms (the stricter reading of "server tick").
+3. **Bandwidth per client** is read from the WebSocket's TCP socket byte counter (`client.ref._socket.bytesWritten`, a private field of ws 8.x; framing included). If a future ws changes it, the perf line reports 0 and the matchlog integration test fails.
+4. A relative `LOG_DIR` is taken from the repo root (the server runs from `server/`). Tests write logs to the system temp folder; Playwright to `test-results/logs`.
+5. **Load room tuning** (`loadTuning`): minion damage 0, ring drain 0, waves never run out, one spawn per tick, cap from the host's `enemyCap` (clamped to 1..120). Minions still walk, swing and die; bolts still fly.
+6. **Load-test budget numbers** (`TUNING.loadTest`): warm-up 2 min; memory early window 2–5 min vs the last 3 min; load held = ≥ 95% of the cap in ≥ 90% of samples; for runs too short for the memory windows, memory is reported "n/a" (not a pass, not a fail).
+7. **Bot behaviour** (`tools/bots/brain.ts`): revive the nearest downed/dead teammate within ring + 4 m, otherwise stay within 70% of the ring radius, drift around the platform, shoot the nearest targetable enemy within bolt range, back off from enemies closer than 2 m. Bot constants live in the brain file because they shape test traffic, not the game.
+8. **Docker**: two-stage build, runtime runs as `node` (uid 1000, so log files belong to the host user), read-only root filesystem with `/tmp` as tmpfs, all capabilities dropped, `no-new-privileges`, `restart: unless-stopped`, health check on `/api/lan`. The runtime image also installs the client's production dependencies (npm workspaces); harmless, only size.
+9. **Docker runs with sudo** (JCCJ, 2026-11-02): no `docker` group, because membership is root-equivalent. The host starts the server with `sudo docker compose up -d`. Rootless Docker was ruled out: in rootless mode `network_mode: host` doesn't use the laptop's real network, which breaks the loopback host check.
+
+### Load test result (2026-11-02, reference laptop, 8 bots, 120 enemies, 15 min): PASSED
+
+- Tick p95 over the run: simulation 0.85 ms + state patch 0.8 ms = **1.7 ms** (budget 10 ms). Worst 10 s window p95 1.75 + 1.2 ms; worst single tick 4.2 ms.
+- Memory: heap median 24.4 MB (min 2–5) → 26.2 MB (last 3 min), limit 31.8; RSS 124.6 → 133.4 MB, limit 142.1. RSS rose from 109 MB in the first minute and flattened after about minute 10; recheck on a longer run.
+- Load held: ≥ 114 enemies in 100% of samples; 4,319 kills. 8/8 bots connected at the end.
+- **Bandwidth per client: about 42.5 kB/s average, 43.9 kB/s max** (all clients see the same state). Ceiling still to be set, as the brief says.
+- Note #12 (one schema object per spawned enemy and bolt) did not show up: no pooling needed.
+- A Docker image build overlapped the last minutes of the run.
+- Still to measure by hand: client fps on Low/Medium (120 enemies) and High (`--cap 80`) with `?fps=1`, and the host on Low while serving 8 clients.
+
+10. **No `no-new-privileges` in docker-compose.yml** (found 2026-11-02 on the first container runs): under snap Docker's AppArmor confinement it makes every exec in the container fail with "operation not permitted" (first `/sbin/docker-init`, then, with `init` removed, `docker-entrypoint.sh`). My first diagnosis blamed `init: true`; that was wrong. `init` stays out anyway (Colyseus handles SIGTERM/SIGINT itself and closes open match logs). The container still runs as `node` with **all capabilities dropped**, so setuid binaries cannot gain root powers. Docker config tests keep `no-new-privileges` out and `cap_drop: ALL` in. For audit 3.
+11. `tools/docker-check.sh` runs the whole container check (start, `/api/lan`, host page, full run, LAN IP refused as host, log ownership, user, read-only filesystem) and prints PASS/FAIL per check. Run it with `bash tools/docker-check.sh` (asks for sudo once).
+12. Docker check passed on 2026-11-02 (`bash tools/docker-check.sh`, all 8 checks).
+
+### Open items from the first trial (2026-11-02, JCCJ: 1 player, no bots, trackpad)
+
+- **Trackpad: no aiming or shooting while moving.** Likely cause: Ubuntu's "Disable touchpad while typing" (`org.gnome.desktop.peripherals.touchpad disable-while-typing` is `true` on the reference laptop). It blocks every trackpad event while a key is held, so the browser never sees them. The input code has no such rule. **To confirm** by turning the setting off. Options put to JCCJ: (1) a join-screen hint + game-night checklist + recommend a mouse; (2) a keyboard auto-fire toggle (new control: parked or 1f); (3) nothing in the game. Decision pending.

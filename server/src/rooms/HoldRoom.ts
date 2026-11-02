@@ -1,4 +1,5 @@
 import { type AuthContext, type Client, Room, ServerError } from '@colyseus/core';
+import { loadTuning } from '@crossfire/shared/rules/loadtest';
 import {
   isLoopbackAddress,
   RateLimiter,
@@ -16,8 +17,12 @@ import {
   type Phase,
   type RunEndedMessage,
 } from '@crossfire/shared/types';
+import type { EndReason, LeaveReason } from '../log/format';
+import { round2 } from '../log/format';
+import { logDir, MatchLog } from '../log/MatchLog';
+import { kBps, memoryMB, socketBytesWritten, TickStats } from '../log/perf';
 import { FixedTicker } from '../sim/tick';
-import { World } from '../sim/world';
+import { World, type WorldOptions } from '../sim/world';
 import { BoltState, EnemyState, HeroState, HoldState, PlayerState } from './state';
 
 type Role = 'host' | 'player';
@@ -52,7 +57,9 @@ function now(): number {
 export class HoldRoom extends Room<{ state: HoldState }> {
   override maxClients = TUNING.lobby.maxPlayers + TUNING.lobby.maxHostConnections;
   override state = new HoldState();
-  readonly world = new World({ seed: Date.now() >>> 0 });
+  /** Created in onCreate, from worldOptions(). */
+  world!: World;
+  private seed = 0;
   private readonly hosts = new Set<string>();
   private readonly net = new Map<string, NetStats & { limiter: RateLimiter }>();
   private hostSeen = false;
@@ -60,6 +67,19 @@ export class HoldRoom extends Room<{ state: HoldState }> {
   private readonly enemyStates = new Map<number, EnemyState>();
   private readonly boltStates = new Map<number, BoltState>();
   private readonly seen = new Set<number>();
+
+  // ---- match log and perf ----
+  private log: MatchLog | null = null;
+  private runStartMs = 0;
+  /** A perf line is written this often during a run (tests shorten it). */
+  perfIntervalMs = TUNING.log.perfIntervalSec * 1000;
+  private lastPerfMs = 0;
+  private readonly runTicks = new TickStats();
+  private readonly windowTicks = new TickStats();
+  private readonly runPatches = new TickStats();
+  private readonly windowPatches = new TickStats();
+  private readonly bytesAtPerf = new Map<string, number>();
+  private readonly leaveReasons = new Map<string, LeaveReason>();
 
   /** Which addresses count as the host laptop. Overridden in tests to simulate a LAN client. */
   isHostAddress(ip: string | undefined): boolean {
@@ -70,7 +90,14 @@ export class HoldRoom extends Room<{ state: HoldState }> {
     return this.net.get(sessionId);
   }
 
-  override async onCreate(): Promise<void> {
+  /** Simulation settings for this room. The load-test room overrides it. */
+  protected worldOptions(_options: unknown): WorldOptions {
+    return {};
+  }
+
+  override async onCreate(options: unknown): Promise<void> {
+    this.seed = Date.now() >>> 0;
+    this.world = new World({ ...this.worldOptions(options), seed: this.seed });
     this.roomId = await this.generateRoomCode();
 
     this.onMessage(MSG.input, (client, payload: unknown) => {
@@ -103,7 +130,7 @@ export class HoldRoom extends Room<{ state: HoldState }> {
     this.onMessage(MSG.restart, (client) => {
       if (!this.guard(client) || !this.isHost(client)) return;
       this.accept(client);
-      this.backToLobby();
+      this.backToLobby('aborted');
     });
 
     this.onMessage(MSG.kick, (client, payload: unknown) => {
@@ -115,7 +142,10 @@ export class HoldRoom extends Room<{ state: HoldState }> {
       if (typeof id !== 'string') return this.reject(client);
       this.accept(client);
       const target = this.clients.find((c) => c.sessionId === id);
-      if (target && !this.hosts.has(id)) target.leave(CLOSE.kicked);
+      if (target && !this.hosts.has(id)) {
+        this.leaveReasons.set(id, 'kicked');
+        target.leave(CLOSE.kicked);
+      }
     });
 
     this.onMessage('*', (client) => {
@@ -165,20 +195,38 @@ export class HoldRoom extends Room<{ state: HoldState }> {
   }
 
   override onLeave(client: Client): void {
-    this.net.delete(client.sessionId);
-    if (this.hosts.delete(client.sessionId)) return;
-    if (!this.state.players.has(client.sessionId)) return;
-    this.state.players.delete(client.sessionId);
+    const id = client.sessionId;
+    const reason = this.leaveReasons.get(id) ?? 'left';
+    this.leaveReasons.delete(id);
+    this.net.delete(id);
+    this.bytesAtPerf.delete(id);
+    if (this.hosts.delete(id)) return;
+    const player = this.state.players.get(id);
+    if (!player) return;
+    this.state.players.delete(id);
     this.state.playerCount = this.state.players.size;
-    if (this.world.heroes.has(client.sessionId)) {
-      this.world.removeHero(client.sessionId);
-      this.state.heroes.delete(client.sessionId);
+    if (this.world.heroes.has(id)) {
+      this.log?.write(now(), { ev: 'left', name: player.name, reason });
+      this.world.removeHero(id);
+      this.state.heroes.delete(id);
     }
-    if (this.state.phase !== 'lobby' && this.state.players.size === 0) this.backToLobby();
+    if (this.state.phase !== 'lobby' && this.state.players.size === 0) this.backToLobby('empty');
   }
 
   override async onDispose(): Promise<void> {
+    if (this.log) await this.endLog('aborted');
     await this.presence.srem(CODES_CHANNEL, this.roomId);
+  }
+
+  /** Times the state encoding and send, for the perf lines. */
+  override broadcastPatch(): boolean {
+    if (this.state.phase !== 'running') return super.broadcastPatch();
+    const t0 = now();
+    const sent = super.broadcastPatch();
+    const ms = now() - t0;
+    this.runPatches.add(ms);
+    this.windowPatches.add(ms);
+    return sent;
   }
 
   // ---- message guards ----
@@ -191,7 +239,10 @@ export class HoldRoom extends Room<{ state: HoldState }> {
     const t = now();
     if (s.limiter.allow(t)) return true;
     s.dropped++;
-    if (s.limiter.shouldKick(t)) client.leave(CLOSE.flood);
+    if (s.limiter.shouldKick(t)) {
+      this.leaveReasons.set(client.sessionId, 'flooded');
+      client.leave(CLOSE.flood);
+    }
     return false;
   }
 
@@ -227,13 +278,19 @@ export class HoldRoom extends Room<{ state: HoldState }> {
       hs.name = p.name;
       this.state.heroes.set(id, hs);
     }
-    this.world.start(now());
+    const t = now();
+    this.world.start(t);
     this.setPhase('running');
     this.syncState();
+    this.openLog(
+      t,
+      players.map(([, p]) => p.name),
+    );
   }
 
-  private backToLobby(): void {
+  private backToLobby(reason: EndReason = 'aborted'): void {
     if (this.state.phase === 'lobby') return;
+    if (this.log) void this.endLog(reason);
     this.world.stop();
     for (const id of [...this.world.heroes.keys()]) this.world.removeHero(id);
     this.state.heroes.clear();
@@ -250,15 +307,120 @@ export class HoldRoom extends Room<{ state: HoldState }> {
 
   private tick(): void {
     if (this.state.phase !== 'running') return;
-    this.world.step(now());
+    const t0 = now();
+    this.world.step(t0);
+    let ended = false;
     for (const ev of this.world.events) {
-      if (ev.type === 'runEnded') {
-        this.setPhase('ended');
-        const msg: RunEndedMessage = { wave: ev.wave, durationSec: ev.durationSec };
-        this.broadcast(SERVER_MSG.ended, msg);
+      switch (ev.type) {
+        case 'runEnded': {
+          this.setPhase('ended');
+          const msg: RunEndedMessage = { wave: ev.wave, durationSec: ev.durationSec };
+          this.broadcast(SERVER_MSG.ended, msg);
+          ended = true;
+          break;
+        }
+        case 'waveStarted':
+        case 'waveCleared':
+          this.log?.write(t0, { ev: ev.type, wave: ev.wave });
+          break;
+        case 'heroDowned':
+        case 'heroDied':
+        case 'heroRevived': {
+          const name = this.world.heroes.get(ev.id)?.name;
+          const kind = ev.type === 'heroDowned' ? 'downed' : ev.type === 'heroDied' ? 'died' : 'revived';
+          if (name !== undefined) this.log?.write(t0, { ev: kind, name });
+          break;
+        }
       }
     }
     this.syncState();
+    const ms = now() - t0;
+    this.runTicks.add(ms);
+    this.windowTicks.add(ms);
+    if (ended) void this.endLog('wiped');
+    else if (t0 - this.lastPerfMs >= this.perfIntervalMs) this.writePerf(t0);
+  }
+
+  // ---- match log ----
+
+  private openLog(t: number, names: string[]): void {
+    if (this.log) void this.endLog('aborted');
+    this.runStartMs = t;
+    this.lastPerfMs = t;
+    this.runTicks.reset();
+    this.windowTicks.reset();
+    this.runPatches.reset();
+    this.windowPatches.reset();
+    this.bytesAtPerf.clear();
+    for (const c of this.clients)
+      if (this.state.players.has(c.sessionId)) this.bytesAtPerf.set(c.sessionId, socketBytesWritten(c.ref));
+    this.log = new MatchLog(logDir(), this.roomId, new Date(), t);
+    this.log.write(t, {
+      ev: 'start',
+      at: new Date().toISOString(),
+      code: this.roomId,
+      seed: this.seed,
+      players: names,
+    });
+    this.log.write(t, { ev: 'waveStarted', wave: this.world.wave });
+  }
+
+  private writePerf(t: number): void {
+    const log = this.log;
+    if (!log) return;
+    const elapsed = t - this.lastPerfMs;
+    const perClient: Record<string, number> = {};
+    let sum = 0;
+    let max = 0;
+    let n = 0;
+    for (const c of this.clients) {
+      const p = this.state.players.get(c.sessionId);
+      if (!p) continue;
+      const bytes = socketBytesWritten(c.ref);
+      const rate = kBps(bytes, this.bytesAtPerf.get(c.sessionId) ?? bytes, elapsed);
+      this.bytesAtPerf.set(c.sessionId, bytes);
+      perClient[p.name] = round2(rate);
+      sum += rate;
+      if (rate > max) max = rate;
+      n++;
+    }
+    const mem = memoryMB();
+    log.write(t, {
+      ev: 'perf',
+      tickP95Ms: round2(this.windowTicks.percentile(0.95)),
+      tickMaxMs: round2(this.windowTicks.max),
+      patchP95Ms: round2(this.windowPatches.percentile(0.95)),
+      ticks: this.windowTicks.count,
+      heapMB: round2(mem.heapMB),
+      rssMB: round2(mem.rssMB),
+      enemies: this.world.enemies.count,
+      bolts: this.world.projectiles.count,
+      players: n,
+      kBpsAvg: round2(n > 0 ? sum / n : 0),
+      kBpsMax: round2(max),
+      kBps: perClient,
+    });
+    this.windowTicks.reset();
+    this.windowPatches.reset();
+    this.lastPerfMs = t;
+  }
+
+  private endLog(reason: EndReason): Promise<void> {
+    const log = this.log;
+    if (!log) return Promise.resolve();
+    this.log = null;
+    const t = now();
+    log.write(t, {
+      ev: 'end',
+      reason,
+      wave: this.world.wave,
+      durationSec: Math.round((t - this.runStartMs) / 1000),
+      kills: this.world.kills,
+      tickP95Ms: round2(this.runTicks.percentile(0.95)),
+      tickMaxMs: round2(this.runTicks.max),
+      patchP95Ms: round2(this.runPatches.percentile(0.95)),
+    });
+    return log.close();
   }
 
   /** Mirrors the simulation into the synced state. Schema only sends fields that changed. */
@@ -349,5 +511,20 @@ export class HoldRoom extends Room<{ state: HoldState }> {
 export class RemoteOnlyHoldRoom extends HoldRoom {
   override isHostAddress(): boolean {
     return false;
+  }
+}
+
+/**
+ * Test-only load room (`hold_load`), registered only when the server runs with
+ * CROSSFIRE_LOAD_ROOM=1. Heroes take no damage and the field stays at the enemy cap the host
+ * asks for (`enemyCap` create option, at most the game cap). Everything else is a normal room.
+ */
+export class LoadHoldRoom extends HoldRoom {
+  protected override worldOptions(options: unknown): WorldOptions {
+    const cap =
+      typeof options === 'object' && options !== null
+        ? (options as Record<string, unknown>).enemyCap
+        : undefined;
+    return { tuning: loadTuning(TUNING, cap) };
   }
 }

@@ -1,6 +1,8 @@
 /** Types and protocol constants shared by client and server. */
 
 export const ROOM_NAME = 'hold';
+/** Test-only load room, registered only with CROSSFIRE_LOAD_ROOM=1. */
+export const LOAD_ROOM_NAME = 'hold_load';
 
 /** Letters used in room codes (4 letters, no I or O to avoid confusion with 1 and 0). */
 export const ROOM_CODE_LETTERS = 'ABCDEFGHJKLMNPQRSTUVWXYZ';

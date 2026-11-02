@@ -22,7 +22,11 @@
     "build": "npm run build -w client",
     "fetch-assets": "node tools/fetch-assets.mjs",
     "assets": "node tools/assets.mjs",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "bots": "tsx tools/bots/run.ts",
+    "load-test": "tsx tools/load-test.ts",
+    "docker:up": "docker compose up -d --build",
+    "docker:down": "docker compose down"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
@@ -36,9 +40,9 @@
     "globals": "^17.14.0",
     "meshoptimizer": "^1.3.0",
     "prettier": "3.9",
-    "tsx": "^4.23.15",
     "typescript": "^6.0.3",
     "typescript-eslint": "^8.72.1",
-    "vitest": "^5.0.5"
+    "vitest": "^5.0.5",
+    "yaml": "^2.9.1"
   }
 }

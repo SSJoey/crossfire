@@ -1,0 +1,61 @@
+import { ROOM_CODE_LETTERS } from '@crossfire/shared/types';
+
+/**
+ * Match log events. One JSON object per line, `t` (ms since the run started) and `ev` first.
+ * Names only: never an IP address or a session id.
+ */
+export type EndReason = 'wiped' | 'aborted' | 'empty';
+export type LeaveReason = 'left' | 'kicked' | 'flooded';
+
+export type LogEvent =
+  | { ev: 'start'; at: string; code: string; seed: number; players: string[] }
+  | { ev: 'waveStarted'; wave: number }
+  | { ev: 'waveCleared'; wave: number }
+  | { ev: 'downed'; name: string }
+  | { ev: 'died'; name: string }
+  | { ev: 'revived'; name: string }
+  | { ev: 'left'; name: string; reason: LeaveReason }
+  | {
+      ev: 'perf';
+      tickP95Ms: number;
+      tickMaxMs: number;
+      /** State encoding + send (Colyseus broadcastPatch), timed separately from the tick. */
+      patchP95Ms: number;
+      ticks: number;
+      heapMB: number;
+      rssMB: number;
+      enemies: number;
+      bolts: number;
+      players: number;
+      kBpsAvg: number;
+      kBpsMax: number;
+      kBps: Record<string, number>;
+    }
+  | {
+      ev: 'end';
+      reason: EndReason;
+      wave: number;
+      durationSec: number;
+      kills: number;
+      tickP95Ms: number;
+      tickMaxMs: number;
+      patchP95Ms: number;
+    };
+
+/** One log line, newline included. JSON escaping keeps any name on a single line. */
+export function logLine(t: number, event: LogEvent): string {
+  return JSON.stringify({ t: Math.round(t), ...event }) + '\n';
+}
+
+const CODE_RE = new RegExp(`^[${ROOM_CODE_LETTERS}]{4}$`);
+
+/** `2026-11-02T20-15-03.123Z_ABCD.jsonl`: sortable, no colons (safe on every filesystem). */
+export function logFileName(start: Date, code: string): string {
+  if (!CODE_RE.test(code)) throw new Error(`Invalid room code for a log file: ${JSON.stringify(code)}`);
+  return `${start.toISOString().replace(/:/g, '-')}_${code}.jsonl`;
+}
+
+/** Rounds to 2 decimals for compact perf lines. */
+export function round2(v: number): number {
+  return Math.round(v * 100) / 100;
+}

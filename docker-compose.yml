@@ -1,0 +1,27 @@
+# Crossfire on the host laptop. LAN only: never forward this port on the router.
+#   docker compose up -d --build   (or npm run docker:up)
+#   Host page: http://localhost:2567/host
+services:
+  crossfire:
+    build: .
+    image: crossfire:local
+    # Host networking keeps the host's own browser at 127.0.0.1 (the host check) and lets
+    # /api/lan list the laptop's real LAN addresses. Linux only.
+    network_mode: host
+    # Node runs as PID 1 (no `init`): Colyseus shuts down cleanly on SIGTERM, and open match
+    # logs get their `end` line.
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp
+    # All capabilities dropped: even a setuid binary cannot gain root powers. No
+    # `no-new-privileges`: under snap Docker's AppArmor it makes every exec fail.
+    cap_drop:
+      - ALL
+    volumes:
+      # Match logs stay on the host and can be deleted at any time.
+      - ./logs:/app/logs
+    environment:
+      PORT: '2567'
+      BIND_HOST: '0.0.0.0'
+      LOG_DIR: /app/logs

@@ -3,10 +3,10 @@ import { networkInterfaces } from 'node:os';
 import { join, resolve } from 'node:path';
 import { defineRoom, defineServer } from '@colyseus/core';
 import { WebSocketTransport } from '@colyseus/ws-transport';
-import { ROOM_NAME } from '@crossfire/shared/types';
+import { LOAD_ROOM_NAME, ROOM_NAME } from '@crossfire/shared/types';
 import express from 'express';
 import { lanAddresses } from './lan';
-import { HoldRoom, RemoteOnlyHoldRoom } from './rooms/HoldRoom';
+import { HoldRoom, LoadHoldRoom, RemoteOnlyHoldRoom } from './rooms/HoldRoom';
 
 /** The production client build. */
 const DEFAULT_CLIENT_DIR = resolve(import.meta.dirname, '../../client/dist');
@@ -14,6 +14,8 @@ const DEFAULT_CLIENT_DIR = resolve(import.meta.dirname, '../../client/dist');
 export interface AppOptions {
   /** Registers test-only rooms. Never set in production. */
   testRooms?: boolean;
+  /** Registers the load-test room `hold_load` (CROSSFIRE_LOAD_ROOM=1). Never set in production. */
+  loadRooms?: boolean;
   /** Folder with the built client to serve. Skipped when it does not exist (development). */
   clientDir?: string;
 }
@@ -24,6 +26,7 @@ export function createApp(opts: AppOptions = {}) {
     rooms: {
       [ROOM_NAME]: defineRoom(HoldRoom),
       ...(opts.testRooms ? { hold_remote: defineRoom(RemoteOnlyHoldRoom) } : {}),
+      ...(opts.loadRooms ? { [LOAD_ROOM_NAME]: defineRoom(LoadHoldRoom) } : {}),
     },
     transport: new WebSocketTransport({ maxPayload: 16 * 1024 }),
     greet: false,

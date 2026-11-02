@@ -1,0 +1,10 @@
+node_modules
+**/node_modules
+logs
+assets/kaykit
+test-results
+playwright-report
+coverage
+client/dist
+.git
+.claude

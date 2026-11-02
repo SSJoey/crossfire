@@ -4,6 +4,11 @@ import { createApp } from './app';
 const port = Number(process.env.PORT ?? 2567);
 const host = process.env.BIND_HOST ?? '0.0.0.0';
 
-const server = createApp();
+// The test-only load room exists only when this is set (tools/load-test.ts sets it).
+const loadRooms = process.env.CROSSFIRE_LOAD_ROOM === '1';
+if (loadRooms)
+  console.warn('CROSSFIRE_LOAD_ROOM=1: the test-only load room is enabled. Not for game nights.');
+
+const server = createApp({ loadRooms });
 await server.listen(port, host);
 console.log(`Crossfire server listening on ${host}:${port}`);

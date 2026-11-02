@@ -60,6 +60,8 @@ test('host, join, play, go down, end screen, restart', async ({ browser }) => {
   await expect(player.locator('#game-canvas')).toBeVisible();
   await expect(player.locator('#hud-wave')).toHaveText('1');
   await expect.poll(async () => (await debugState(player)).me?.status).toBe('standing');
+  // The fps overlay is off unless ?fps=1 is given.
+  expect(await player.locator('#fps-overlay').count()).toBe(0);
 
   // D moves the hero to the right (+X).
   const start = (await debugState(player)).me!;
@@ -81,6 +83,24 @@ test('host, join, play, go down, end screen, restart', async ({ browser }) => {
   await expect(player.locator('#lobby-ready')).toBeVisible();
   await expect(player.locator('#end-screen')).toBeHidden();
   await expect.poll(async () => (await debugState(player)).phase).toBe('lobby');
+});
+
+test('?fps=1 shows the fps overlay in the game', async ({ browser }) => {
+  const hostPage = await browser.newPage();
+  const player = await browser.newPage();
+  const code = await openHost(hostPage);
+  await player.goto(`/?code=${code}&gfx=low&fps=1`);
+  await player.locator('#join-name').fill('Counter');
+  await player.locator('#join-btn').click();
+  await player.locator('#lobby-ready').click();
+  await expect(hostPage.locator('#host-start')).toBeEnabled();
+  await hostPage.locator('#host-start').click();
+  const overlay = player.locator('#fps-overlay');
+  await expect(overlay).toBeVisible();
+  await expect(overlay).toContainText(/\d+ fps/, { timeout: 5000 });
+  await expect(overlay).toContainText(/1% low \d+/);
+  await expect(overlay).toContainText(/enemies \d+/);
+  await expect(overlay).toContainText('low');
 });
 
 test('a 9th player is told the game is full', async ({ browser, baseURL }) => {

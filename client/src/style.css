@@ -391,3 +391,19 @@ select {
   position: absolute;
   inset: 0;
 }
+
+/* ?fps=1 performance readout */
+.fps-overlay {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  padding: 3px 8px;
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.6);
+  color: #d8f5c0;
+  font:
+    12px/1.4 ui-monospace,
+    monospace;
+  pointer-events: none;
+  z-index: 5;
+}

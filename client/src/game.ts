@@ -3,6 +3,7 @@ import { assistTarget, type AimTarget } from '@crossfire/shared/rules/aim';
 import { TUNING } from '@crossfire/shared/tuning';
 import { MSG, type HeroStatus, type InputMessage } from '@crossfire/shared/types';
 import { debugView } from './debug';
+import { FpsOverlay, fpsEnabled } from './hud/fps';
 import { el } from './dom';
 import { Hud, type HudView } from './hud/hud';
 import { clampToMap, rayToGround } from './input/aim';
@@ -110,6 +111,7 @@ export class Game {
   ) {
     this.canvas = el('canvas', { id: 'game-canvas', attrs: { tabindex: '0', 'aria-label': 'Game view' } });
     this.root = el('div', { className: 'game' }, this.canvas, this.hud.root);
+    if (this.fps) this.root.append(this.fps.root);
     this.stage = new Stage(this.canvas);
     this.stage.scene.add(this.reticle.group);
     this.controls = new Controls(this.canvas);
@@ -164,10 +166,14 @@ export class Game {
   }
 
   private enemyShadows = false;
+  private tierName: Tier = 'medium';
+  /** Performance readout, only with ?fps=1. */
+  private readonly fps = fpsEnabled(location.search) ? new FpsOverlay() : null;
 
   /** Enemies cast shadows on High only (as in the look test); the arena and heroes on Medium too. */
   setTier(tier: Tier): void {
     this.stage.applyTier(tier);
+    this.tierName = tier;
     this.enemyShadows = tier === 'high';
     const heroShadows = this.stage.shadows;
     for (const h of this.heroes.values()) h.unit.setShadows(heroShadows);
@@ -372,6 +378,7 @@ export class Game {
   // ---- frame ----
 
   private frame(t: number): void {
+    this.fps?.frame(t - this.lastFrame, this.hudView.horde, this.tierName);
     const dt = Math.min(0.1, (t - this.lastFrame) / 1000);
     this.lastFrame = t;
     const now = performance.now();
