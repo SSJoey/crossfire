@@ -40,7 +40,13 @@ const SKELETON_CLIPS = [
 
 /** Stage 1a: Ember (Mage) for everyone, Skeleton Minion as the only enemy. */
 const JOBS = [
-  { out: 'Mage.glb', src: 'adventurers/Mage.glb', kind: 'character' },
+  // Ember holds only the staff: the KayKit Mage also carries a wand and two spellbooks.
+  {
+    out: 'Mage.glb',
+    src: 'adventurers/Mage.glb',
+    kind: 'character',
+    dropParts: ['1H_Wand', 'Spellbook', 'Spellbook_open'],
+  },
   { out: 'hero-anims.glb', src: 'adventurers/Mage.glb', kind: 'anims', clips: HERO_CLIPS },
   { out: 'Skeleton_Minion.glb', src: 'skeletons/Skeleton_Minion.glb', kind: 'character' },
   { out: 'skeleton-anims.glb', src: 'skeletons/Skeleton_Minion.glb', kind: 'anims', clips: SKELETON_CLIPS },
@@ -58,6 +64,21 @@ function disposeClip(a) {
   for (const c of a.listChannels()) c.dispose();
   for (const s of a.listSamplers()) s.dispose();
   a.dispose();
+}
+
+/** Removes named mesh parts (unused props). Returns their triangle count. */
+function dropParts(root, names, file) {
+  let triangles = 0;
+  for (const name of names) {
+    const node = root.listNodes().find((n) => n.getName() === name && n.getMesh());
+    if (!node) throw new Error(`${file}: no part named ${name}`);
+    for (const p of node.getMesh().listPrimitives()) {
+      const idx = p.getIndices();
+      triangles += (idx ? idx.getCount() : p.getAttribute('POSITION').getCount()) / 3;
+    }
+    node.setMesh(null);
+  }
+  return triangles;
 }
 
 async function main() {
@@ -79,9 +100,11 @@ async function main() {
     if (job.kind === 'character') {
       for (const a of root.listAnimations()) disposeClip(a);
       disposeOrphanAccessors(root);
+      const dropped = job.dropParts ?? [];
+      const droppedTriangles = dropParts(root, dropped, job.src);
       await doc.transform(prune(), dedup());
       // Body parts and bone-attached props become one skinned mesh: fewer draw calls per unit.
-      merge = mergeSkinnedParts(doc, basename(job.out, '.glb'));
+      merge = { dropped, droppedTriangles, ...mergeSkinnedParts(doc, basename(job.out, '.glb')) };
       await doc.transform(prune(), weld());
     } else {
       const have = new Set(root.listAnimations().map((a) => a.getName()));

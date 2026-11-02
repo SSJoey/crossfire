@@ -4,13 +4,19 @@
     "Mage.glb": {
       "source": "adventurers/Mage.glb",
       "sourceBytes": 3589240,
-      "bytes": 112992,
+      "bytes": 100440,
       "clips": [],
       "merge": {
-        "partsBefore": 12,
+        "dropped": [
+          "1H_Wand",
+          "Spellbook",
+          "Spellbook_open"
+        ],
+        "droppedTriangles": 734,
+        "partsBefore": 9,
         "drawCallsAfter": 1,
-        "trianglesBefore": 5683,
-        "trianglesAfter": 5683,
+        "trianglesBefore": 4949,
+        "trianglesAfter": 4949,
         "boxBefore": [
           [
             -1.1285,
@@ -18,7 +24,7 @@
             -1.01715
           ],
           [
-            1.29722,
+            1.04645,
             2.71565,
             1.25425
           ]
@@ -30,7 +36,7 @@
             -1.01715
           ],
           [
-            1.29722,
+            1.04645,
             2.71565,
             1.25425
           ]
@@ -58,6 +64,8 @@
       "bytes": 112656,
       "clips": [],
       "merge": {
+        "dropped": [],
+        "droppedTriangles": 0,
         "partsBefore": 9,
         "drawCallsAfter": 2,
         "trianglesBefore": 5288,

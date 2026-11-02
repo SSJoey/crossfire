@@ -114,7 +114,7 @@ three 0.187.0 (+ @types/three 0.187.0), vite 8.3.5, @colyseus/sdk 0.18.9 (client
 5. three.js 0.187 removed `PCFSoftShadowMap`; the client uses `PCFShadowMap`.
 6. `window.__crossfire` exposes a read-only `{ phase, me: { x, z, status } }` for the Playwright test. It controls nothing.
 7. Arena in 1a: ground, dirt, red outside zone, orange ring edge, hold platform + brazier. Torches, ruins, rocks, trees and the flag wait for the art pass (1g).
-8. The Mage keeps all its KayKit props (staff, wand, spellbook, hat), as in the look test.
+8. ~~The Mage keeps all its KayKit props, as in the look test.~~ Changed 2026-11-02 (JCCJ): Ember holds only the staff; see the body-part merge notes.
 9. An enemy that disappears from the synced state during a run is treated as killed (death animation, then it sinks). The server removes enemies only when they die or the run resets.
 10. The hero cast animation plays when a new bolt appears within 1.5 m of a hero (the server sends no attack event). The hero `Hit_A` clip is in the pipeline but not played yet (heroes are hit constantly; the red vignette and HP bar show damage).
 11. Inputs are sent from the render loop, so a hidden tab stops sending; the server's 250 ms stale rule then makes that hero stand still. Window blur also releases all keys.
@@ -135,3 +135,4 @@ three 0.187.0 (+ @types/three 0.187.0), vite 8.3.5, @colyseus/sdk 0.18.9 (client
 - Checks: triangle counts equal before and after (Mage 5,683, Minion 5,288); bind-pose bounds equal to 5 decimals, both computed by skinning every vertex at rest; one skin per file; every weight set sums to 1 on a valid joint. Screenshots of idle, running and downed heroes show the props following their bones.
 - Meshopt quantization gives the mesh an adjusted copy of its skin; the pipeline disposes the unused original.
 - Character files are now 110 KB each (were 135 and 140 KB). Total model set about 790 KB.
+- **Ember holds only the staff** (JCCJ, 2026-11-02): the pipeline drops the Mage's `1H_Wand`, `Spellbook` and `Spellbook_open` before merging (734 triangles). The hat and cape stay. This differs from the look test, which showed every prop. Mage is now 4,949 triangles and 98 KB.

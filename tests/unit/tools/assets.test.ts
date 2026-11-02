@@ -24,6 +24,9 @@ interface Manifest {
       clips: string[];
       /** Character files only: what the body-part merge did. */
       merge?: {
+        /** Parts removed before merging (unused props), with their triangle count. */
+        dropped: string[];
+        droppedTriangles: number;
         partsBefore: number;
         drawCallsAfter: number;
         trianglesBefore: number;
@@ -92,6 +95,15 @@ describe('KayKit asset pipeline output', () => {
         for (let a = 0; a < 3; a++)
           expect(m.boxAfter[k]![a]!, `${f} box`).toBeCloseTo(m.boxBefore[k]![a]!, 3);
     }
+  });
+
+  it('Ember holds only the staff: the wand and both spellbooks are dropped', () => {
+    const m = manifest.models[MODEL_FILES.hero]!.merge!;
+    expect([...m.dropped].sort()).toEqual(['1H_Wand', 'Spellbook', 'Spellbook_open']);
+    expect(m.droppedTriangles).toBeGreaterThan(0);
+    // The staff, hat and cape stay: 12 parts minus the 3 dropped props.
+    expect(m.partsBefore).toBe(9);
+    expect(manifest.models[MODEL_FILES.minion]!.merge!.dropped).toEqual([]);
   });
 
   it('every vertex is bound to a real joint with weights summing to 1', async () => {
