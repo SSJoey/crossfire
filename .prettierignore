@@ -1,0 +1,6 @@
+node_modules
+logs
+assets
+package-lock.json
+BRIEF.md
+CLAUDE.md
