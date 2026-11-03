@@ -201,3 +201,9 @@ yaml 2.9.1 (dev, for the Docker config test); Docker image `node:22.23.4-bookwor
 - Server: tick p95 0.55 ms + patch 0.8 ms over the run (worst 10 s window 0.85 ms); worst tick 3.3 ms. Peak 47 enemies on the field, so the 120 cap was not reached. Heap 23–27 MB; RSS 111 → 122 MB.
 - Bandwidth: 10.0 kB/s per client on average, peak 18.7 kB/s (lower than the load test's 43 kB/s at 120 enemies).
 - Not yet the 10-minute acceptance run (7 minutes). Observations: 8 players clear waves 1–11 with no downs, so endless waves may be too easy for a full team early on; tuning is for 1e (and the bots do not dodge).
+
+## 2026-11-03: Client performance in the match log, added to slice 1a.4 (JCCJ)
+
+- Goal: one end-to-end game produces a log Claude can read for performance per **graphics tier**, **number of players** and **number of enemies**.
+- Already logged (1a.3): every `perf` line (10 s) has players, enemies, bolts, server tick/patch p95, memory and kB/s per player.
+- **New in 1a.4:** each client reports its tier, fps and 1% low (and canvas size) to the server; the server validates and rate-limits it (untrusted input) and logs it per player name in the `perf` line. Details (message shape, interval, limits) planned in the 1a.4 session, before security audit 1.
