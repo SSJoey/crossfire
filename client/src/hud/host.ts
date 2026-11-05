@@ -9,7 +9,7 @@ import type { RoomState } from '../net/state';
 /**
  * The host control page (only works on the host laptop). It is not a player: the host plays
  * from a second tab. Shows the room code, link and QR code, the live player list, and the
- * start, restart and kick controls (all checked again on the server).
+ * start, restart, kick and bot controls (all checked again on the server).
  */
 export class HostApp {
   private room: GameRoom | null = null;
@@ -33,12 +33,18 @@ export class HostApp {
   private readonly phaseText = el('div', { id: 'host-phase', className: 'muted' });
   private readonly startBtn = el('button', { id: 'host-start', className: 'primary', text: 'Start run' });
   private readonly restartBtn = el('button', { id: 'host-restart', text: 'Back to lobby' });
+  private readonly addBotBtn = el('button', { id: 'host-add-bot', text: 'Add bot' });
+  private readonly removeBotsBtn = el('button', { id: 'host-remove-bots', text: 'Remove bots' });
   private readonly error = el('div', { id: 'host-error', className: 'err', attrs: { role: 'alert' } });
 
   constructor(root: HTMLElement) {
     this.startBtn.disabled = true;
     this.restartBtn.disabled = true;
+    this.addBotBtn.disabled = true;
+    this.removeBotsBtn.disabled = true;
     this.addrLabel.hidden = true;
+    this.addBotBtn.addEventListener('click', () => this.room?.send(MSG.addBot, {}));
+    this.removeBotsBtn.addEventListener('click', () => this.room?.send(MSG.removeBots, {}));
     this.startBtn.addEventListener('click', () => this.room?.send(MSG.start, {}));
     this.restartBtn.addEventListener('click', () => this.room?.send(MSG.restart, {}));
     this.addrSelect.addEventListener('change', () => {
@@ -76,6 +82,7 @@ export class HostApp {
           this.list,
           this.phaseText,
           el('div', { className: 'row' }, this.startBtn, this.restartBtn),
+          el('div', { className: 'row' }, this.addBotBtn, this.removeBotsBtn),
           el('div', { className: 'muted', text: 'To play yourself, open the link in another tab.' }),
           this.error,
         ),
@@ -114,7 +121,7 @@ export class HostApp {
   private onState(s: RoomState): void {
     setText(this.count, `${s.playerCount} / ${TUNING.lobby.maxPlayers}`);
     const rows: string[] = [];
-    s.players.forEach((p, id) => rows.push(`${id}|${p.ready ? 1 : 0}|${p.name}`));
+    s.players.forEach((p, id) => rows.push(`${id}|${p.ready ? 1 : 0}|${p.bot ? 1 : 0}|${p.name}`));
     const key = `${s.phase}\n${rows.join('\n')}`;
     if (this.list.dataset.key !== key) {
       this.list.dataset.key = key;
@@ -127,6 +134,7 @@ export class HostApp {
             'li',
             {},
             el('span', { className: 'nm', text: p.name }),
+            ...(p.bot ? [el('span', { className: 'bot', text: '(bot)' })] : []),
             el('span', { className: `rd${p.ready ? ' on' : ''}`, text: p.ready ? 'Ready' : 'Not ready' }),
             kick,
           ),
@@ -134,12 +142,16 @@ export class HostApp {
       });
     }
     let allReady = s.players.size > 0;
+    let botCount = 0;
     s.players.forEach((p) => {
       if (!p.ready) allReady = false;
+      if (p.bot) botCount++;
     });
     const phase: Phase = s.phase;
     this.startBtn.disabled = phase !== 'lobby' || !allReady;
     this.restartBtn.disabled = phase === 'lobby';
+    this.addBotBtn.disabled = phase !== 'lobby' || s.players.size >= TUNING.lobby.maxPlayers;
+    this.removeBotsBtn.disabled = phase !== 'lobby' || botCount === 0;
     setText(
       this.phaseText,
       phase === 'lobby'

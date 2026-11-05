@@ -7,6 +7,7 @@ import {
   RateLimiter,
   sanitizeInput,
   sanitizeName,
+  sanitizePerfReport,
   uniqueName,
 } from '@crossfire/shared/rules/validation';
 import { TUNING } from '@crossfire/shared/tuning';
@@ -189,4 +190,52 @@ describe('isLoopbackAddress', () => {
       expect(isLoopbackAddress(ip)).toBe(false);
     },
   );
+});
+
+describe('sanitizePerfReport', () => {
+  const report = { tier: 'medium', fps: 58.37, low1: 41.04, w: 1920, h: 1080, dpr: 1 };
+
+  it('accepts a valid report and rounds fps to 1 decimal', () => {
+    expect(sanitizePerfReport(report)).toEqual({
+      tier: 'medium',
+      fps: 58.4,
+      low1: 41,
+      w: 1920,
+      h: 1080,
+      dpr: 1,
+    });
+    expect(sanitizePerfReport({ ...report, tier: 'high', fps: 0, low1: 0, dpr: 1.25 })).not.toBeNull();
+    expect(
+      sanitizePerfReport({ ...report, tier: 'low', fps: 1000, w: 1, h: 16384, dpr: 0.25 }),
+    ).not.toBeNull();
+  });
+
+  it('rejects an unknown tier', () => {
+    for (const tier of ['ultra', 'HIGH', '', 1, null])
+      expect(sanitizePerfReport({ ...report, tier })).toBeNull();
+  });
+
+  it('rejects NaN, Infinity, negative and huge numbers', () => {
+    for (const k of ['fps', 'low1', 'w', 'h', 'dpr'] as const)
+      for (const v of [Number.NaN, Infinity, -Infinity, -1, 1e9, '60'])
+        expect(sanitizePerfReport({ ...report, [k]: v }), `${k}=${String(v)}`).toBeNull();
+    expect(sanitizePerfReport({ ...report, fps: 1000.1 })).toBeNull();
+    expect(sanitizePerfReport({ ...report, dpr: 0.2 })).toBeNull();
+    expect(sanitizePerfReport({ ...report, dpr: 8.5 })).toBeNull();
+  });
+
+  it('rejects canvas sizes that are not whole pixels from 1 to 16384', () => {
+    for (const v of [0, 1.5, 16385]) {
+      expect(sanitizePerfReport({ ...report, w: v })).toBeNull();
+      expect(sanitizePerfReport({ ...report, h: v })).toBeNull();
+    }
+  });
+
+  it('rejects missing and extra keys, and non-objects', () => {
+    const { dpr: _dpr, ...missing } = report;
+    expect(sanitizePerfReport(missing)).toBeNull();
+    expect(sanitizePerfReport({ ...report, name: 'x' })).toBeNull();
+    for (const v of [null, undefined, 'perf', 42, [], [report]]) expect(sanitizePerfReport(v)).toBeNull();
+    expect(sanitizePerfReport(JSON.parse('{"__proto__":{"x":1},"tier":"low"}'))).toBeNull();
+  });
 });

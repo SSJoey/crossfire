@@ -29,6 +29,43 @@ describe('log format', () => {
     expect(Object.keys(JSON.parse(line) as object).slice(0, 2)).toEqual(['t', 'ev']);
   });
 
+  it('start line lists the bots; perf line carries client reports by name, one line each', () => {
+    const start = logLine(0, {
+      ev: 'start',
+      at: '2026-11-03T10:00:00.000Z',
+      code: 'ABCD',
+      seed: 1,
+      players: ['Ann', 'Bot 1'],
+      bots: ['Bot 1'],
+    });
+    expect(JSON.parse(start)).toMatchObject({ players: ['Ann', 'Bot 1'], bots: ['Bot 1'] });
+    const perf = logLine(10000, {
+      ev: 'perf',
+      tickP95Ms: 1,
+      tickMaxMs: 2,
+      patchP95Ms: 1,
+      ticks: 200,
+      heapMB: 20,
+      rssMB: 100,
+      enemies: 40,
+      bolts: 10,
+      players: 2,
+      kBpsAvg: 10,
+      kBpsMax: 12,
+      kBps: { 'An\nn': 10, 'Bot 1': 12 },
+      clients: { 'An\nn': { tier: 'low', fps: 59.9, low1: 48, w: 1920, h: 1080, dpr: 1 } },
+    });
+    expect(perf.indexOf('\n')).toBe(perf.length - 1);
+    expect((JSON.parse(perf) as { clients: Record<string, unknown> }).clients['An\nn']).toEqual({
+      tier: 'low',
+      fps: 59.9,
+      low1: 48,
+      w: 1920,
+      h: 1080,
+      dpr: 1,
+    });
+  });
+
   it('file name: ISO start time without colons, then the room code', () => {
     const name = logFileName(new Date('2026-11-02T20:15:03.123Z'), 'ABCD');
     expect(name).toBe('2026-11-02T20-15-03.123Z_ABCD.jsonl');
@@ -67,7 +104,14 @@ describe('MatchLog', () => {
     const dir = tempDir();
     const start = new Date('2026-11-02T20:15:03.000Z');
     const log = new MatchLog(dir, 'ABCD', start, 1000);
-    log.write(1000, { ev: 'start', at: start.toISOString(), code: 'ABCD', seed: 7, players: ['Ann', 'Bo'] });
+    log.write(1000, {
+      ev: 'start',
+      at: start.toISOString(),
+      code: 'ABCD',
+      seed: 7,
+      players: ['Ann', 'Bo'],
+      bots: [],
+    });
     log.write(1500, { ev: 'waveStarted', wave: 1 });
     log.write(9000, {
       ev: 'end',

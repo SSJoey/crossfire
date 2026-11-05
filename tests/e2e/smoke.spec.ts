@@ -1,3 +1,5 @@
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { Client } from '@colyseus/sdk';
 import { expect, test, type Page } from '@playwright/test';
 import { JOIN_ERRORS } from '@crossfire/shared/types';
@@ -6,6 +8,18 @@ import { JOIN_ERRORS } from '@crossfire/shared/types';
 interface CrossfireDebug {
   phase: string;
   me: { x: number; z: number; status: string } | null;
+}
+
+/** Same folder as LOG_DIR in playwright.config.ts. */
+const LOG_DIR = resolve(import.meta.dirname, '../../test-results/logs');
+
+function logLines(code: string): Record<string, unknown>[] {
+  if (!existsSync(LOG_DIR)) return [];
+  return readdirSync(LOG_DIR)
+    .filter((f) => f.endsWith(`_${code}.jsonl`))
+    .flatMap((f) => readFileSync(resolve(LOG_DIR, f), 'utf8').split('\n'))
+    .filter((l) => l.length > 0)
+    .map((l) => JSON.parse(l) as Record<string, unknown>);
 }
 
 async function debugState(page: Page): Promise<CrossfireDebug> {
@@ -78,6 +92,15 @@ test('host, join, play, go down, end screen, restart', async ({ browser }) => {
   await expect(player.locator('#end-wave')).toHaveText(/^\d+$/);
   await expect(player.locator('#end-time')).toHaveText(/^\d+:\d\d$/);
 
+  // The browser reported its tier and fps; the perf lines carry it under the player's name.
+  const reported = logLines(code)
+    .filter((l) => l.ev === 'perf')
+    .map((l) => (l.clients as Record<string, { tier: string; fps: number; w: number }>)[evil.slice(0, 16)])
+    .find((c) => c !== undefined);
+  expect(reported).toMatchObject({ tier: 'low' });
+  expect(reported!.fps).toBeGreaterThan(0);
+  expect(reported!.w).toBeGreaterThan(0);
+
   // The host restarts: everyone is back in the lobby.
   await hostPage.locator('#host-restart').click();
   await expect(player.locator('#lobby-ready')).toBeVisible();
@@ -101,6 +124,23 @@ test('?fps=1 shows the fps overlay in the game', async ({ browser }) => {
   await expect(overlay).toContainText(/1% low \d+/);
   await expect(overlay).toContainText(/enemies \d+/);
   await expect(overlay).toContainText('low');
+});
+
+test('the host page adds and removes bots', async ({ browser }) => {
+  const hostPage = await browser.newPage();
+  failOnDialog(hostPage);
+  await openHost(hostPage);
+  await expect(hostPage.locator('#host-remove-bots')).toBeDisabled();
+  await hostPage.locator('#host-add-bot').click();
+  await hostPage.locator('#host-add-bot').click();
+  await expect(hostPage.locator('#host-count')).toHaveText('2 / 8', { timeout: 10_000 });
+  await expect(hostPage.locator('#host-players li .nm')).toHaveText(['Bot 1', 'Bot 2']);
+  await expect(hostPage.locator('#host-players li .bot')).toHaveText(['(bot)', '(bot)']);
+  // Bots get ready by themselves, so the run can start.
+  await expect(hostPage.locator('#host-start')).toBeEnabled({ timeout: 5000 });
+  await hostPage.locator('#host-remove-bots').click();
+  await expect(hostPage.locator('#host-count')).toHaveText('0 / 8');
+  await expect(hostPage.locator('#host-remove-bots')).toBeDisabled();
 });
 
 test('a 9th player is told the game is full', async ({ browser, baseURL }) => {

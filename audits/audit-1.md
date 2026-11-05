@@ -27,14 +27,15 @@ Write the report to audits/audit-1-findings.md and stop. Do not fix anything.
 
 ## Where to look
 
-- `server/src/rooms/HoldRoom.ts`: message handlers, auth, host check, rate limit, kick, the load-test room.
+- `server/src/rooms/HoldRoom.ts`: message handlers, auth, host check, rate limit, kick, add/remove bots, client perf reports, the load-test room.
+- `server/src/bots/`: bot tickets (`tickets.ts`), the bot child process (`process.ts`, `supervisor.ts`, `ipc.ts`), the bot client and brain.
 - `server/src/app.ts`, `server/src/index.ts`: rooms registered, HTTP routes, static files, WebSocket max payload, bind address, `CROSSFIRE_LOAD_ROOM`.
-- `shared/rules/validation.ts`: input sanitising, names, rate limiter, loopback check, sequence numbers.
+- `shared/rules/validation.ts`: input sanitising, perf report sanitising, names, rate limiter, loopback check, sequence numbers.
 - `shared/tuning.ts` (`net`, `lobby`): limits.
 - `server/src/log/`: match log content and file names.
 - `client/src/hud/`, `client/src/dom.ts`: how names and server text are rendered.
 - `docker-compose.yml`, `Dockerfile`: host networking, user, mounts.
-- Existing tests: `tests/integration/network.test.ts`, `tests/integration/lobby.test.ts`, `tests/unit/shared/validation.test.ts`.
+- Existing tests: `tests/integration/network.test.ts`, `tests/integration/lobby.test.ts`, `tests/integration/hostbots.test.ts`, `tests/integration/matchlog.test.ts`, `tests/unit/shared/validation.test.ts`.
 
 ## Checklist
 
@@ -70,9 +71,16 @@ Write the report to audits/audit-1-findings.md and stop. Do not fix anything.
 19. Nothing a client sends can grow server memory without bound (maps keyed by session id are cleaned on leave; pools are fixed).
 20. A slow or stalled client cannot stall the simulation for everyone.
 
+### Host-added bots and client perf reports (slice 1a.4)
+
+21. `addBot` and `removeBots` are refused for anyone but a loopback host connection, and outside the lobby. Bots count against the 8-player cap; seats promised to bots still on their way are reserved, and no burst of `addBot` pushes the room past 8.
+22. Bot tickets: a LAN client cannot guess, reuse or replay one to be marked a bot, and nothing a client sends in `botTicket` (any type) can throw. Expired tickets free their seat. Being a bot gives no extra power anyway: check that is true.
+23. The bot child process: started only by the room, one per room, stopped when its last bot leaves, when the last host page leaves and when the room is disposed; it never outlives the server (IPC disconnect). Nothing a client sends reaches the fork arguments, environment or IPC messages except through the room's own values (room code, generated name, ticket); the bot URL comes from the server's own listen address.
+24. Client `perf` reports: exact keys, a known tier, finite numbers within limits (`TUNING.log`), accepted only from players during a run, at most one per 5 s per player, and only the latest one per player is kept (memory bounded, cleared on leave). Report values cannot break a log line.
+
 ### Logs and personal data
 
-21. Match logs hold names only: no IP addresses, session ids or other personal data. Logs stay on the host (`./logs`).
+25. Match logs hold names only: no IP addresses, session ids or other personal data. Logs stay on the host (`./logs`).
 
 ## How to run things
 

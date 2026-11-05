@@ -207,3 +207,42 @@ yaml 2.9.1 (dev, for the Docker config test); Docker image `node:22.23.4-bookwor
 - Goal: one end-to-end game produces a log Claude can read for performance per **graphics tier**, **number of players** and **number of enemies**.
 - Already logged (1a.3): every `perf` line (10 s) has players, enemies, bolts, server tick/patch p95, memory and kB/s per player.
 - **New in 1a.4:** each client reports its tier, fps and 1% low (and canvas size) to the server; the server validates and rate-limits it (untrusted input) and logs it per player name in the `perf` line. Details (message shape, interval, limits) planned in the 1a.4 session, before security audit 1.
+
+## 2026-11-03: Slice 1a.4 planning (answers from JCCJ)
+
+1. **Bots run in one child process per room** (`child_process.fork`), started on the first "Add bot" and stopped when the room's last bot leaves. Bots connect over loopback like real players. Their CPU and memory stay out of the game server's tick and memory numbers in the match log.
+2. **Host page controls**: "Add bot" (+1 per click) and "Remove bots" (all), lobby only; the existing Kick removes a single bot. Bots are marked "(bot)" in the host page's player list.
+3. **Client perf reports every 10 s, always on during a run** (not only with `?fps=1`): average fps over those 10 s, 1% low over the same frames, tier, drawing-buffer width × height and pixel ratio. The server accepts at most one per 5 s per player, keeps the latest, and writes reports younger than 20 s into every `perf` line under `clients`, by name.
+4. **The last host page leaving removes the room's bots** (any phase), so an abandoned room cannot keep playing by itself.
+
+## 2026-11-03: Slice 1a.4 build notes
+
+### How to run
+
+- Host page: **Add bot** / **Remove bots** under Start and Back to lobby. `npm run bots -- --code ABCD` still works for bots on another machine or process.
+- Every match log `perf` line now has `clients: { name: { tier, fps, low1, w, h, dpr } }`; the `start` line has `bots: [names]`.
+
+### Versions (npm registry, 2026-11-03)
+
+No new packages. `@colyseus/sdk` 0.18.9 (still the latest) moved from the server's dev dependencies to its dependencies, because the bot process needs it at runtime (also in Docker). `tsx` 4.23.15 (latest).
+
+### Implementation choices (not in the brief; for review)
+
+1. **Bot files moved** from `tools/bots/` to `server/src/bots/` (`bot.ts`, `brain.ts`), because the Docker image only ships `server/` and `shared/`. `tools/bots/run.ts` (the CLI), the load test and the tests import from there. `Bot` no longer imports the client's state type (it has a small local one).
+2. **Bot tickets.** For each "Add bot" the room issues a one-time random ticket (`crypto.randomUUID()`, expires after 10 s, `TUNING.lobby.botTicketSec`) and hands it to its bot process over IPC. The bot joins with `{ name, botTicket }`, and `onAuth` uses the ticket up and marks that player `bot: true` at join time (no race with IPC). A wrong, reused, expired or non-string ticket means a normal join (no error). The bot's name comes from the ticket, not from the join options. This is a server-internal ticket, not a player credential; the "no tokens" rule for the host (loopback check) is unchanged.
+3. **Seats for bots on their way are reserved**: a human join is refused as "full" when players + pending bot tickets reach 8. "Add bot" is refused at the same point.
+4. **Bot names**: the lowest free `Bot N` (case-insensitive, so a human called "bot 1" pushes the bot to "Bot 2").
+5. **`PlayerState.bot`** is synced (the host page shows "(bot)"). Being a bot gives no extra rights.
+6. **Bot URL** comes from the server's own listen address: `http://127.0.0.1:<PORT>`, or `BIND_HOST` when that is a specific address (`createApp({ botUrl })` → `HoldRoom.botUrl`). Never from client options. Without a bot URL, "Add bot" is refused.
+7. **Bot process lifecycle**: `fork(server/src/bots/process.ts, { cwd: server/, execArgv: ['--import', 'tsx'] })`. It stops when told to (last bot left, Remove bots, last host page left, room disposed; killed with SIGKILL if it hasn't exited after 2 s) and exits by itself when the IPC channel closes (server crash or shutdown). A bot that fails to join is reported back and logged on the server console.
+8. **A bots-only run is allowed** (the host watches from the host page). "The room returns to the lobby when every player leaves" still counts bots as players.
+9. **Perf report validation** (`sanitizePerfReport`, limits in `TUNING.log`): exact keys; tier `high`/`medium`/`low`; fps and 1% low finite, 0–1000; `w`, `h` whole pixels 1–16384; `dpr` 0.25–8. Values are rounded (fps 1 decimal, dpr 2). Reports from host pages, in the lobby, invalid ones and ones within 5 s of the last accepted one are rejected and counted.
+10. **Client side** (`client/src/net/perfReport.ts`): frames longer than 1 s (`TUNING.log.maxFrameMs`: hidden tab or frozen machine) are skipped, not counted. `FpsStats.low1()` takes an optional "newest N frames". The window restarts whenever the run is not running. The first `perf` line of a run (at 10 s) usually has no client reports yet: client and server both count 10 s from the start.
+11. **Docker check**: `tools/docker-check.sh` now also adds a bot in the container (`tools/host-bot-check.ts`).
+
+### Checks (2026-11-03)
+
+- 305 unit + integration tests pass, 5 Playwright tests pass, lint and typecheck clean.
+- After the tests no bot process was left running.
+- A production server (`npm run server`) added a bot from a scripted host page (`tools/host-bot-check.ts`).
+- `bash tools/docker-check.sh` needs sudo: **to run by JCCJ**.

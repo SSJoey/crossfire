@@ -11,7 +11,7 @@ import { Client } from '@colyseus/sdk';
 import { TUNING } from '@crossfire/shared/tuning';
 import { LOAD_ROOM_NAME, MSG } from '@crossfire/shared/types';
 import type { RoomState } from '../client/src/net/state';
-import { Bot } from './bots/bot';
+import { Bot } from '../server/src/bots/bot';
 import { verdict, type LogRecord } from './load/verdict';
 
 const ROOT = resolve(import.meta.dirname, '..');

@@ -3,7 +3,7 @@
 import { parseArgs } from 'node:util';
 import { Client } from '@colyseus/sdk';
 import { normaliseRoomCode } from '../../client/src/net/joinflow';
-import { Bot } from './bot';
+import { Bot } from '../../server/src/bots/bot';
 
 const { values } = parseArgs({
   options: {

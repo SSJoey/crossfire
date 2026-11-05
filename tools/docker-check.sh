@@ -42,6 +42,10 @@ host=$(npx tsx -e "import('@colyseus/sdk').then(({Client}) => new Client('http:/
 [[ "$host" == *"only works on the host laptop"* ]] && pass "LAN address $lanip is not accepted as host ($host)" \
   || fail "LAN address $lanip: expected the not-host refusal, got: $host"
 
+bot=$(URL=http://127.0.0.1:2567 npx tsx tools/host-bot-check.ts 2>&1)
+[[ "$bot" == *"bot joined"* ]] && pass "Add bot works in the container ($bot)" \
+  || { fail "Add bot did not work:"; echo "$bot" | tail -5; sudo docker compose logs --tail 15; }
+
 after=$(ls logs/*.jsonl 2>/dev/null | wc -l)
 newest=$(ls -t logs/*.jsonl 2>/dev/null | head -1)
 if [[ "$after" -gt "$before" ]] && [[ "$(stat -c %u "$newest")" == "$(id -u)" ]]; then

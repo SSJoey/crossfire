@@ -9,6 +9,10 @@ const loadRooms = process.env.CROSSFIRE_LOAD_ROOM === '1';
 if (loadRooms)
   console.warn('CROSSFIRE_LOAD_ROOM=1: the test-only load room is enabled. Not for game nights.');
 
-const server = createApp({ loadRooms });
+// Host-added bots connect back to this server over loopback (or the bind address, if specific).
+const botHost = host === '0.0.0.0' || host === '::' ? '127.0.0.1' : host;
+const botUrl = `http://${botHost.includes(':') ? `[${botHost}]` : botHost}:${port}`;
+
+const server = createApp({ loadRooms, botUrl });
 await server.listen(port, host);
 console.log(`Crossfire server listening on ${host}:${port}`);

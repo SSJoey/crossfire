@@ -5,6 +5,8 @@ export const PlayerState = schema(
   {
     name: t.string().default(''),
     ready: t.boolean().default(false),
+    /** Added from the host page (marked by the server, never by the client). */
+    bot: t.boolean().default(false),
   },
   'PlayerState',
 );

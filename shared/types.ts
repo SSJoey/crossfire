@@ -27,6 +27,24 @@ export interface InputMessage {
   revive: boolean;
 }
 
+/** Graphics tiers a client can run at. */
+export const GFX_TIERS = ['high', 'medium', 'low'] as const;
+export type GfxTier = (typeof GFX_TIERS)[number];
+
+/** A player's client performance over the last report interval (logged in the match log). */
+export interface PerfReport {
+  tier: GfxTier;
+  /** Average frames per second over the interval. */
+  fps: number;
+  /** fps over the slowest 1% of the interval's frames. */
+  low1: number;
+  /** Canvas drawing-buffer size in device pixels. */
+  w: number;
+  h: number;
+  /** Device pixel ratio the renderer uses. */
+  dpr: number;
+}
+
 /** Client → server message types. */
 export const MSG = {
   input: 'input',
@@ -34,6 +52,12 @@ export const MSG = {
   start: 'start',
   restart: 'restart',
   kick: 'kick',
+  /** Host only: add one bot player (lobby only). */
+  addBot: 'addBot',
+  /** Host only: remove every bot player (lobby only). */
+  removeBots: 'removeBots',
+  /** Player only, during a run: a PerfReport. */
+  perf: 'perf',
 } as const;
 
 /** Server → client message types. */

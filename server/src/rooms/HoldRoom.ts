@@ -5,6 +5,7 @@ import {
   RateLimiter,
   sanitizeInput,
   sanitizeName,
+  sanitizePerfReport,
   uniqueName,
 } from '@crossfire/shared/rules/validation';
 import { TUNING } from '@crossfire/shared/tuning';
@@ -14,9 +15,12 @@ import {
   MSG,
   ROOM_CODE_LETTERS,
   SERVER_MSG,
+  type PerfReport,
   type Phase,
   type RunEndedMessage,
 } from '@crossfire/shared/types';
+import { BotSupervisor } from '../bots/supervisor';
+import { BotTickets, nextBotName } from '../bots/tickets';
 import type { EndReason, LeaveReason } from '../log/format';
 import { round2 } from '../log/format';
 import { logDir, MatchLog } from '../log/MatchLog';
@@ -29,6 +33,8 @@ type Role = 'host' | 'player';
 interface AuthResult {
   role: Role;
   name?: string;
+  /** Joined with a valid bot ticket from this room. */
+  bot?: boolean;
 }
 
 export interface NetStats {
@@ -55,6 +61,12 @@ function now(): number {
  * lobby choices; every message passes a per-client rate limit and validation first.
  */
 export class HoldRoom extends Room<{ state: HoldState }> {
+  /**
+   * Where host-added bots connect (this server, over loopback). Set by createApp from the
+   * server's own listen address, never from anything a client sends. Unset: no bots.
+   */
+  static botUrl: string | undefined;
+
   override maxClients = TUNING.lobby.maxPlayers + TUNING.lobby.maxHostConnections;
   override state = new HoldState();
   /** Created in onCreate, from worldOptions(). */
@@ -80,6 +92,21 @@ export class HoldRoom extends Room<{ state: HoldState }> {
   private readonly windowPatches = new TickStats();
   private readonly bytesAtPerf = new Map<string, number>();
   private readonly leaveReasons = new Map<string, LeaveReason>();
+  /** At most one client report per player in this time (tests shorten it). */
+  clientReportMinGapMs = TUNING.log.clientReportMinGapSec * 1000;
+  /** Reports older than this are left out of the perf line (tests shorten it). */
+  clientReportMaxAgeMs = TUNING.log.clientReportMaxAgeSec * 1000;
+  private readonly reports = new Map<string, { report: PerfReport; atMs: number }>();
+
+  // ---- host-added bots ----
+  private bots: BotSupervisor | null = null;
+  private botSeed = 0;
+  private readonly botTickets = new BotTickets(TUNING.lobby.botTicketSec * 1000, TUNING.lobby.maxPlayers);
+
+  /** The bot process id while this room has one (for tests). */
+  get botProcessPid(): number | undefined {
+    return this.bots?.pid;
+  }
 
   /** Which addresses count as the host laptop. Overridden in tests to simulate a LAN client. */
   isHostAddress(ip: string | undefined): boolean {
@@ -148,6 +175,32 @@ export class HoldRoom extends Room<{ state: HoldState }> {
       }
     });
 
+    this.onMessage(MSG.addBot, (client) => {
+      if (!this.guard(client) || !this.isHost(client)) return;
+      if (!this.addBot()) return this.reject(client);
+      this.accept(client);
+    });
+
+    this.onMessage(MSG.removeBots, (client) => {
+      if (!this.guard(client) || !this.isHost(client)) return;
+      if (this.state.phase !== 'lobby') return this.reject(client);
+      this.accept(client);
+      this.removeBots();
+    });
+
+    this.onMessage(MSG.perf, (client, payload: unknown) => {
+      if (!this.guard(client)) return;
+      const id = client.sessionId;
+      if (this.state.phase !== 'running' || !this.state.players.has(id)) return this.reject(client);
+      const report = sanitizePerfReport(payload);
+      if (!report) return this.reject(client);
+      const t = now();
+      const prev = this.reports.get(id);
+      if (prev && t - prev.atMs < this.clientReportMinGapMs) return this.reject(client);
+      this.accept(client);
+      this.reports.set(id, { report, atMs: t });
+    });
+
     this.onMessage('*', (client) => {
       if (!this.guard(client)) return;
       const s = this.net.get(client.sessionId);
@@ -165,6 +218,10 @@ export class HoldRoom extends Room<{ state: HoldState }> {
     }
     if (!this.hostSeen) throw new ServerError(403, JOIN_ERRORS.notHost);
     if (this.state.phase !== 'lobby') throw new ServerError(409, JOIN_ERRORS.inProgress);
+    if (opts.botTicket !== undefined) {
+      const botName = this.botTickets.consume(opts.botTicket, now());
+      if (botName !== null) return { role: 'player', name: botName, bot: true };
+    }
     const n = sanitizeName(opts.name);
     if (!n.ok) throw new ServerError(400, JOIN_ERRORS.emptyName);
     return { role: 'player', name: n.name };
@@ -186,10 +243,14 @@ export class HoldRoom extends Room<{ state: HoldState }> {
     }
     // Checked again here, synchronously, so simultaneous joins cannot overshoot the cap.
     if (this.state.phase !== 'lobby') throw new ServerError(409, JOIN_ERRORS.inProgress);
-    if (this.state.players.size >= TUNING.lobby.maxPlayers) throw new ServerError(409, JOIN_ERRORS.full);
+    // Seats promised to bots that are still on their way count as taken for humans.
+    const reserved = auth.bot ? 0 : this.botTickets.pending(now());
+    if (this.state.players.size + reserved >= TUNING.lobby.maxPlayers)
+      throw new ServerError(409, JOIN_ERRORS.full);
     const names = [...this.state.players.values()].map((p) => p.name);
     const player = new PlayerState();
     player.name = uniqueName(auth.name ?? '', names);
+    player.bot = auth.bot === true;
     this.state.players.set(client.sessionId, player);
     this.state.playerCount = this.state.players.size;
   }
@@ -200,11 +261,17 @@ export class HoldRoom extends Room<{ state: HoldState }> {
     this.leaveReasons.delete(id);
     this.net.delete(id);
     this.bytesAtPerf.delete(id);
-    if (this.hosts.delete(id)) return;
+    this.reports.delete(id);
+    if (this.hosts.delete(id)) {
+      // No host page left: nobody can remove the bots any more, so they go now.
+      if (this.hosts.size === 0) this.removeBots();
+      return;
+    }
     const player = this.state.players.get(id);
     if (!player) return;
     this.state.players.delete(id);
     this.state.playerCount = this.state.players.size;
+    if (player.bot) this.stopBotsIfIdle();
     if (this.world.heroes.has(id)) {
       this.log?.write(now(), { ev: 'left', name: player.name, reason });
       this.world.removeHero(id);
@@ -214,6 +281,9 @@ export class HoldRoom extends Room<{ state: HoldState }> {
   }
 
   override async onDispose(): Promise<void> {
+    this.botTickets.clear();
+    this.bots?.stop();
+    this.bots = null;
     if (this.log) await this.endLog('aborted');
     await this.presence.srem(CODES_CHANNEL, this.roomId);
   }
@@ -260,6 +330,46 @@ export class HoldRoom extends Room<{ state: HoldState }> {
     return this.hosts.has(client.sessionId);
   }
 
+  // ---- host-added bots ----
+
+  /** Adds one bot (lobby only, while a seat is free). Returns false if refused. */
+  private addBot(): boolean {
+    const url = HoldRoom.botUrl;
+    if (!url || this.state.phase !== 'lobby') return false;
+    const t = now();
+    if (this.state.players.size + this.botTickets.pending(t) >= TUNING.lobby.maxPlayers) return false;
+    const taken = [...this.state.players.values()].map((p) => p.name).concat(this.botTickets.names(t));
+    const name = nextBotName(taken);
+    const ticket = this.botTickets.issue(name, t);
+    if (!ticket) return false;
+    this.bots ??= new BotSupervisor((botName, error) => {
+      console.warn(`Bot "${botName}" could not join room ${this.roomId}: ${error}`);
+      this.stopBotsIfIdle();
+    });
+    this.bots.add({ url, code: this.roomId, name, seed: ++this.botSeed, ticket });
+    return true;
+  }
+
+  /** Every bot leaves; the bot process stops. */
+  private removeBots(): void {
+    this.botTickets.clear();
+    for (const c of this.clients) {
+      if (!this.state.players.get(c.sessionId)?.bot) continue;
+      this.leaveReasons.set(c.sessionId, 'kicked');
+      c.leave(CLOSE.kicked);
+    }
+    this.stopBotsIfIdle();
+  }
+
+  /** Stops the bot process once no bot is in the room or on its way. */
+  private stopBotsIfIdle(): void {
+    if (!this.bots) return;
+    if (this.botTickets.pending(now()) > 0) return;
+    for (const p of this.state.players.values()) if (p.bot) return;
+    this.bots.stop();
+    this.bots = null;
+  }
+
   // ---- lobby flow ----
 
   private setPhase(phase: Phase): void {
@@ -285,6 +395,7 @@ export class HoldRoom extends Room<{ state: HoldState }> {
     this.openLog(
       t,
       players.map(([, p]) => p.name),
+      players.filter(([, p]) => p.bot).map(([, p]) => p.name),
     );
   }
 
@@ -343,7 +454,7 @@ export class HoldRoom extends Room<{ state: HoldState }> {
 
   // ---- match log ----
 
-  private openLog(t: number, names: string[]): void {
+  private openLog(t: number, names: string[], bots: string[]): void {
     if (this.log) void this.endLog('aborted');
     this.runStartMs = t;
     this.lastPerfMs = t;
@@ -352,6 +463,7 @@ export class HoldRoom extends Room<{ state: HoldState }> {
     this.runPatches.reset();
     this.windowPatches.reset();
     this.bytesAtPerf.clear();
+    this.reports.clear();
     for (const c of this.clients)
       if (this.state.players.has(c.sessionId)) this.bytesAtPerf.set(c.sessionId, socketBytesWritten(c.ref));
     this.log = new MatchLog(logDir(), this.roomId, new Date(), t);
@@ -361,6 +473,7 @@ export class HoldRoom extends Room<{ state: HoldState }> {
       code: this.roomId,
       seed: this.seed,
       players: names,
+      bots,
     });
     this.log.write(t, { ev: 'waveStarted', wave: this.world.wave });
   }
@@ -384,6 +497,11 @@ export class HoldRoom extends Room<{ state: HoldState }> {
       if (rate > max) max = rate;
       n++;
     }
+    const clients: Record<string, PerfReport> = {};
+    for (const [id, r] of this.reports) {
+      const p = this.state.players.get(id);
+      if (p && t - r.atMs <= this.clientReportMaxAgeMs) clients[p.name] = r.report;
+    }
     const mem = memoryMB();
     log.write(t, {
       ev: 'perf',
@@ -399,6 +517,7 @@ export class HoldRoom extends Room<{ state: HoldState }> {
       kBpsAvg: round2(n > 0 ? sum / n : 0),
       kBpsMax: round2(max),
       kBps: perClient,
+      clients,
     });
     this.windowTicks.reset();
     this.windowPatches.reset();

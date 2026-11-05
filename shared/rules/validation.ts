@@ -1,5 +1,5 @@
 import { TUNING } from '../tuning';
-import type { InputMessage } from '../types';
+import { GFX_TIERS, type GfxTier, type InputMessage, type PerfReport } from '../types';
 
 const INPUT_KEYS = ['seq', 'moveX', 'moveZ', 'aimX', 'aimZ', 'attack', 'revive'] as const;
 const MAX_SEQ = 2 ** 31 - 1;
@@ -41,6 +41,38 @@ export function sanitizeInput(raw: unknown, net = TUNING.net, ring = TUNING.ring
     az *= ring.mapRadius / ad;
   }
   return { seq, moveX: mx, moveZ: mz, aimX: ax, aimZ: az, attack, revive };
+}
+
+const PERF_KEYS = ['tier', 'fps', 'low1', 'w', 'h', 'dpr'] as const;
+
+function inRange(v: unknown, min: number, max: number): v is number {
+  return typeof v === 'number' && Number.isFinite(v) && v >= min && v <= max;
+}
+
+function roundTo(v: number, decimals: number): number {
+  const f = 10 ** decimals;
+  return Math.round(v * f) / f;
+}
+
+/**
+ * Validates an untrusted client performance report. Returns a clean copy, or null to drop it.
+ * Rules: exactly the known keys; a known tier; fps and 1% low within 0..maxReportFps;
+ * whole-pixel canvas sizes within 1..maxCanvasPx; pixel ratio within minDpr..maxDpr.
+ */
+export function sanitizePerfReport(raw: unknown, lim = TUNING.log): PerfReport | null {
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return null;
+  const keys = Object.keys(raw);
+  if (keys.length !== PERF_KEYS.length) return null;
+  const o = raw as Record<string, unknown>;
+  for (const k of PERF_KEYS) if (!Object.hasOwn(o, k)) return null;
+
+  const { tier, fps, low1, w, h, dpr } = o;
+  if (!(GFX_TIERS as readonly unknown[]).includes(tier)) return null;
+  if (!inRange(fps, 0, lim.maxReportFps) || !inRange(low1, 0, lim.maxReportFps)) return null;
+  if (!inRange(w, 1, lim.maxCanvasPx) || !Number.isInteger(w)) return null;
+  if (!inRange(h, 1, lim.maxCanvasPx) || !Number.isInteger(h)) return null;
+  if (!inRange(dpr, lim.minDpr, lim.maxDpr)) return null;
+  return { tier: tier as GfxTier, fps: roundTo(fps, 1), low1: roundTo(low1, 1), w, h, dpr: roundTo(dpr, 2) };
 }
 
 /** True when `seq` is newer than the last applied input. */

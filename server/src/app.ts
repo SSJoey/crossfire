@@ -16,12 +16,15 @@ export interface AppOptions {
   testRooms?: boolean;
   /** Registers the load-test room `hold_load` (CROSSFIRE_LOAD_ROOM=1). Never set in production. */
   loadRooms?: boolean;
+  /** Where host-added bots connect: this server's own address (loopback). Unset: no bots. */
+  botUrl?: string;
   /** Folder with the built client to serve. Skipped when it does not exist (development). */
   clientDir?: string;
 }
 
 export function createApp(opts: AppOptions = {}) {
   const clientDir = opts.clientDir ?? DEFAULT_CLIENT_DIR;
+  HoldRoom.botUrl = opts.botUrl;
   return defineServer({
     rooms: {
       [ROOM_NAME]: defineRoom(HoldRoom),

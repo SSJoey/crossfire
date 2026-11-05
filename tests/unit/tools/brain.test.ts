@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { TUNING } from '@crossfire/shared/tuning';
 import type { HeroStatus } from '@crossfire/shared/types';
 import { Rng } from '../../../server/src/sim/rng';
-import { decide, type BotEnemy, type BotUnit, type BotView } from '../../../tools/bots/brain';
+import { decide, type BotEnemy, type BotUnit, type BotView } from '../../../server/src/bots/brain';
 
 function unit(id: string, x: number, z: number, status: HeroStatus = 'standing'): BotUnit {
   return { id, x, z, status };

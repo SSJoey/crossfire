@@ -105,11 +105,26 @@ export const TUNING = {
     maxNameLength: 16,
     /** Extra connections allowed beyond the players (host pages). */
     maxHostConnections: 4,
+    /** A bot added from the host page must join within this time, or its seat is freed (s). */
+    botTicketSec: 10,
   },
 
   log: {
     /** A perf line (tick time, memory, bandwidth) is written to the match log this often. */
     perfIntervalSec: 10,
+    /** Each client reports its tier and fps this often during a run. */
+    clientReportSec: 10,
+    /** The server accepts at most one report per player in this time; extras are rejected. */
+    clientReportMinGapSec: 5,
+    /** A report older than this is left out of the perf line. */
+    clientReportMaxAgeSec: 20,
+    /** Limits of a valid report. */
+    maxReportFps: 1000,
+    maxCanvasPx: 16384,
+    minDpr: 0.25,
+    maxDpr: 8,
+    /** A frame longer than this is a hidden tab or a frozen machine, not a frame (ms). */
+    maxFrameMs: 1000,
   },
 
   /** The test-only load room (CROSSFIRE_LOAD_ROOM=1). Never used in a real game. */

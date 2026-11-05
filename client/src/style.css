@@ -166,6 +166,10 @@ select {
 .players .rd.on {
   color: var(--ok);
 }
+.players .bot {
+  color: var(--muted);
+  font-size: 0.85em;
+}
 .big-code {
   font: 600 88px/0.85 var(--display);
   letter-spacing: 0.08em;

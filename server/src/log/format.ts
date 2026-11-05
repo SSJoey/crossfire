@@ -1,4 +1,4 @@
-import { ROOM_CODE_LETTERS } from '@crossfire/shared/types';
+import { ROOM_CODE_LETTERS, type PerfReport } from '@crossfire/shared/types';
 
 /**
  * Match log events. One JSON object per line, `t` (ms since the run started) and `ev` first.
@@ -8,7 +8,7 @@ export type EndReason = 'wiped' | 'aborted' | 'empty';
 export type LeaveReason = 'left' | 'kicked' | 'flooded';
 
 export type LogEvent =
-  | { ev: 'start'; at: string; code: string; seed: number; players: string[] }
+  | { ev: 'start'; at: string; code: string; seed: number; players: string[]; bots: string[] }
   | { ev: 'waveStarted'; wave: number }
   | { ev: 'waveCleared'; wave: number }
   | { ev: 'downed'; name: string }
@@ -30,6 +30,8 @@ export type LogEvent =
       kBpsAvg: number;
       kBpsMax: number;
       kBps: Record<string, number>;
+      /** Each player's latest client report (tier, fps, 1% low, canvas), by name. Bots send none. */
+      clients: Record<string, PerfReport>;
     }
   | {
       ev: 'end';

@@ -13,6 +13,8 @@ export interface SyncMap<T> {
 export interface PlayerView {
   name: string;
   ready: boolean;
+  /** Added from the host page. */
+  bot: boolean;
 }
 
 export interface HeroView {

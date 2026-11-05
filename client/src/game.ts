@@ -11,6 +11,7 @@ import { Controls } from './input/controls';
 import { InputSeq } from './input/keys';
 import type { GameRoom } from './net/connection';
 import { SnapshotBuffer, type Sample } from './net/interpolation';
+import { PerfReporter } from './net/perfReport';
 import { Predictor } from './net/prediction';
 import type { EnemyStateName, RoomState } from './net/state';
 import type { Models } from './render/assets';
@@ -169,6 +170,9 @@ export class Game {
   private tierName: Tier = 'medium';
   /** Performance readout, only with ?fps=1. */
   private readonly fps = fpsEnabled(location.search) ? new FpsOverlay() : null;
+  /** Tier and fps report for the match log, sent every 10 s during a run. */
+  private readonly perf = new PerfReporter();
+  private phase = '';
 
   /** Enemies cast shadows on High only (as in the look test); the arena and heroes on Medium too. */
   setTier(tier: Tier): void {
@@ -293,6 +297,7 @@ export class Game {
 
     const dbg = debugView();
     dbg.phase = s.phase;
+    this.phase = s.phase;
     const me = s.heroes.get(myId);
     dbg.me = me ? { x: me.x, z: me.z, status: me.status } : null;
 
@@ -379,6 +384,15 @@ export class Game {
 
   private frame(t: number): void {
     this.fps?.frame(t - this.lastFrame, this.hudView.horde, this.tierName);
+    const report = this.perf.frame(
+      t - this.lastFrame,
+      this.phase === 'running',
+      this.tierName,
+      this.canvas.width,
+      this.canvas.height,
+      this.stage.renderer.getPixelRatio(),
+    );
+    if (report) this.room.send(MSG.perf, report);
     const dt = Math.min(0.1, (t - this.lastFrame) / 1000);
     this.lastFrame = t;
     const now = performance.now();

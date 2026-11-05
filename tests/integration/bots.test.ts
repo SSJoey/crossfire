@@ -1,7 +1,7 @@
 import type { ColyseusTestServer } from '@colyseus/testing';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { MSG } from '@crossfire/shared/types';
-import { Bot } from '../../tools/bots/bot';
+import { Bot } from '../../server/src/bots/bot';
 import { bootServer, openLobby, until } from './helpers';
 
 let colyseus: ColyseusTestServer;

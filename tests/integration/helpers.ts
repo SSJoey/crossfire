@@ -5,9 +5,11 @@ import { createApp } from '../../server/src/app';
 import type { HoldRoom } from '../../server/src/rooms/HoldRoom';
 
 export const REMOTE_ROOM = 'hold_remote';
+/** @colyseus/testing listens on this port; host-added bots connect back to it. */
+export const TEST_PORT = 2568;
 
 export async function bootServer(): Promise<ColyseusTestServer> {
-  return boot(createApp({ testRooms: true }));
+  return boot(createApp({ testRooms: true, botUrl: `http://127.0.0.1:${TEST_PORT}` }), TEST_PORT);
 }
 
 /** Polls until the condition holds or the timeout passes. */

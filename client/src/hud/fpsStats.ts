@@ -30,15 +30,17 @@ export class FpsStats {
     return sum > 0 ? (n * 1000) / sum : 0;
   }
 
-  /** "1% low": fps over the slowest 1% of the stored frames (at least one frame). */
-  low1(): number {
-    if (this.size === 0) return 0;
-    const s = this.scratch.subarray(0, this.size);
-    s.set(this.size === this.frames.length ? this.frames : this.frames.subarray(0, this.size));
+  /** "1% low": fps over the slowest 1% of the newest `lastN` stored frames (default all, at least one). */
+  low1(lastN = this.size): number {
+    const n = Math.min(this.size, Math.max(0, Math.floor(lastN)));
+    if (n === 0) return 0;
+    const cap = this.frames.length;
+    const s = this.scratch.subarray(0, n);
+    for (let i = 0; i < n; i++) s[i] = this.frames[(this.head - 1 - i + cap) % cap]!;
     s.sort();
-    const k = Math.max(1, Math.ceil(this.size * 0.01));
+    const k = Math.max(1, Math.ceil(n * 0.01));
     let sum = 0;
-    for (let i = this.size - k; i < this.size; i++) sum += s[i]!;
+    for (let i = n - k; i < n; i++) sum += s[i]!;
     return (k * 1000) / sum;
   }
 }

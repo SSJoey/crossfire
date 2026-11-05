@@ -1,12 +1,23 @@
 import type { Client, Room } from '@colyseus/sdk';
 import { TUNING } from '@crossfire/shared/tuning';
-import { MSG, type InputMessage } from '@crossfire/shared/types';
-import type { RoomState } from '../../client/src/net/state';
+import { MSG, type HeroStatus, type InputMessage, type Phase } from '@crossfire/shared/types';
 import { decide, type BotEnemy, type BotUnit, type BotView } from './brain';
 
 const INPUT_MS = 1000 / TUNING.tickHz;
 /** A bot sets itself ready again this long after the room returns to the lobby. */
 const READY_DELAY_MS = 1000;
+
+/** The part of the synced room state a bot reads (decoded by the SDK, see rooms/state.ts). */
+interface SyncMap<T> {
+  get(key: string): T | undefined;
+  forEach(cb: (value: T, key: string) => void): void;
+}
+interface BotRoomState {
+  phase: Phase;
+  players: SyncMap<{ ready: boolean }>;
+  heroes: SyncMap<{ x: number; z: number; status: HeroStatus }>;
+  enemies: SyncMap<{ x: number; z: number; state: string }>;
+}
 
 /**
  * A headless player: joins by room code through the normal protocol, gets ready by itself,
@@ -21,7 +32,7 @@ export class Bot {
   private inputTimer: ReturnType<typeof setInterval> | null = null;
   private readyTimer: ReturnType<typeof setTimeout> | null = null;
   private startedMs = 0;
-  private state: RoomState | null = null;
+  private state: BotRoomState | null = null;
   private readonly view: BotView;
   private readonly heroPool: BotUnit[] = [];
   private readonly enemyPool: BotEnemy[] = [];
@@ -31,13 +42,18 @@ export class Bot {
     readonly code: string,
     readonly name: string,
     readonly seed: number,
+    /** One-time ticket from the room, so the server marks this player as a bot (host-added bots). */
+    private readonly botTicket?: string,
   ) {
     this.view = { meId: '', heroes: [], enemies: [], timeSec: 0, seed };
   }
 
   /** Joins the room. Rejects with the server's message if the join is refused. */
   async start(): Promise<void> {
-    const room = await this.sdk.joinById(this.code, { name: this.name });
+    const room = await this.sdk.joinById(
+      this.code,
+      this.botTicket ? { name: this.name, botTicket: this.botTicket } : { name: this.name },
+    );
     this.room = room;
     this.connected = true;
     this.startedMs = performance.now();
@@ -47,7 +63,7 @@ export class Bot {
       this.closeCode = code;
       this.clearTimers();
     });
-    room.onStateChange((s: unknown) => this.onState(s as RoomState));
+    room.onStateChange((s: unknown) => this.onState(s as BotRoomState));
     room.send(MSG.ready, { ready: true });
     this.inputTimer = setInterval(() => this.sendInput(), INPUT_MS);
   }
@@ -68,7 +84,7 @@ export class Bot {
     this.readyTimer = null;
   }
 
-  private onState(s: RoomState): void {
+  private onState(s: BotRoomState): void {
     this.state = s;
     if (s.phase !== 'lobby' || this.readyTimer || !this.room) return;
     const me = s.players.get(this.room.sessionId);
