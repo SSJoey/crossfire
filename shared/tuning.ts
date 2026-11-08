@@ -105,6 +105,8 @@ export const TUNING = {
     maxFramesPerSec: 240,
     /** Largest matchmaking request body (bytes); join and create options are tiny (audit 1, F2). */
     maxMatchmakeBodyBytes: 16 * 1024,
+    /** A client with more than this unsent (it stopped reading) is dropped (audit 1, O1). */
+    maxSendBacklogBytes: 1024 * 1024,
   },
 
   lobby: {
@@ -118,6 +120,16 @@ export const TUNING = {
     seatReservationSec: 5,
     /** Joins one LAN address may start per seat-reservation window (the host laptop is exempt). */
     maxReservationsPerIp: 2,
+    /** A client must acknowledge JOIN within this time, or it is dropped and its seat freed (s). */
+    joinAckSec: 5,
+    /** Player seats one LAN address may hold at once; the host laptop is exempt (audit 1, R2). */
+    maxSeatsPerAddress: 1,
+    /** A kicked LAN address cannot rejoin for this long (s). */
+    kickCooldownSec: 60,
+    /** Combining marks kept per character; more are dropped (audit 1, R3). */
+    maxMarksPerGrapheme: 4,
+    /** Hard cap on a name's length in UTF-16 units, whatever it is made of. */
+    maxNameUnits: 64,
   },
 
   log: {

@@ -116,10 +116,15 @@ describe('names', () => {
     const family = '👨‍👩‍👧‍👦';
     const r = sanitizeName(family.repeat(20));
     expect(r.ok).toBe(true);
+    // Changed 2026-11-08 (audit 1, R3): names are also capped at TUNING.lobby.maxNameUnits
+    // UTF-16 units, so 16 family emoji (11 units each) stop at 5, still never split.
     if (r.ok) {
-      expect(graphemeLength(r.name)).toBe(16);
-      expect(r.name).toBe(family.repeat(16));
+      const fit = Math.floor(TUNING.lobby.maxNameUnits / family.length);
+      expect(graphemeLength(r.name)).toBe(fit);
+      expect(r.name).toBe(family.repeat(fit));
     }
+    const faces = sanitizeName('😀'.repeat(20));
+    expect(faces.ok && graphemeLength(faces.name)).toBe(16);
     expect(sanitizeName('🔥Ember🔥')).toEqual({ ok: true, name: '🔥Ember🔥' });
   });
 

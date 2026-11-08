@@ -1,8 +1,18 @@
-import { type AuthContext, type Client, CloseCode, Room, ServerError } from '@colyseus/core';
+import {
+  type AuthContext,
+  type Client,
+  ClientState,
+  CloseCode,
+  Protocol,
+  Room,
+  ServerError,
+} from '@colyseus/core';
 import { loadTuning } from '@crossfire/shared/rules/loadtest';
 import {
   isLoopbackAddress,
+  KickCooldown,
   RateLimiter,
+  seatsHeldBy,
   sanitizeInput,
   sanitizeName,
   sanitizePerfReport,
@@ -35,7 +45,20 @@ interface AuthResult {
   name?: string;
   /** Joined with a valid bot ticket from this room. */
   bot?: boolean;
+  /** The socket's address (forged IP headers are stripped by the HTTP guard). */
+  ip?: string;
 }
+
+/** Colyseus' per-client frame handler, which we wrap (see the HoldRoom constructor). */
+interface FrameHook {
+  _onMessage(client: Client, buffer: Uint8Array): void;
+}
+
+/** Low bits of a frame's first byte: the protocol code (Colyseus PROTOCOL_CODE_MASK). */
+const PROTOCOL_CODE_MASK = 31;
+/** The only frames our clients send, before and after they acknowledge JOIN (audit 1, R1). */
+const FRAMES_WHILE_JOINING = new Set<number>([Protocol.JOIN_ROOM, Protocol.LEAVE_ROOM]);
+const FRAMES_WHEN_JOINED = new Set<number>([Protocol.ROOM_DATA, Protocol.LEAVE_ROOM]);
 
 export interface NetStats {
   /** Every message received, of any type. */
@@ -48,6 +71,13 @@ export interface NetStats {
   dropped: number;
   /** Unknown message types. */
   unknown: number;
+}
+
+interface NetState extends NetStats {
+  limiter: RateLimiter;
+  /** Frames in the current one-second window, for the hard frame cap. */
+  frames: number;
+  framesSince: number;
 }
 
 const CODES_CHANNEL = '$holdcodes';
@@ -82,7 +112,38 @@ export class HoldRoom extends Room<{ state: HoldState }> {
   world!: World;
   private seed = 0;
   private readonly hosts = new Set<string>();
-  private readonly net = new Map<string, NetStats & { limiter: RateLimiter }>();
+  private readonly net = new Map<string, NetState>();
+
+  // ---- seats per LAN address, kicks, join acks (audit 1, R1 / R2) ----
+  /**
+   * Tests only: treat loopback like a LAN laptop for the seat and kick rules. Set by
+   * createApp({ lanClients }). Never in production.
+   */
+  static treatLoopbackAsLan = false;
+  /** sessionId → socket address, for players. */
+  private readonly seatIps = new Map<string, string>();
+  private readonly kicks = new KickCooldown();
+  /** How long a kicked LAN address waits (tests shorten it). */
+  get kickCooldownMs(): number {
+    return this.kicks.ms;
+  }
+  set kickCooldownMs(ms: number) {
+    this.kicks.ms = ms;
+  }
+  private readonly ackTimers = new Map<string, { clear(): void }>();
+
+  constructor() {
+    super();
+    // Every frame a client sends passes our gate before Colyseus sees it (audit 1, R1).
+    // `_onMessage` is a Colyseus internal: it is bound per client right after onJoin
+    // (Room.mjs, `client.ref.on("message", this._onMessage.bind(this, client))`).
+    // tests/regression/half-join.test.ts fails if an upgrade changes that.
+    const hook = this as unknown as FrameHook;
+    const original = hook._onMessage;
+    hook._onMessage = (client, buffer) => {
+      if (this.gateFrame(client, buffer)) original.call(this, client, buffer);
+    };
+  }
   private hostSeen = false;
   private readonly ticker = new FixedTicker(TUNING.tickHz, TUNING.maxCatchUpSteps, () => this.tick());
   private readonly enemyStates = new Map<number, EnemyState>();
@@ -122,6 +183,12 @@ export class HoldRoom extends Room<{ state: HoldState }> {
     return isLoopbackAddress(ip);
   }
 
+  /** A LAN laptop for the seat and kick rules (the host laptop is exempt). */
+  private isLanAddress(ip: string | undefined): ip is string {
+    if (typeof ip !== 'string' || ip === '') return false;
+    return HoldRoom.treatLoopbackAsLan || !isLoopbackAddress(ip);
+  }
+
   netStats(sessionId: string): NetStats | undefined {
     return this.net.get(sessionId);
   }
@@ -137,7 +204,6 @@ export class HoldRoom extends Room<{ state: HoldState }> {
     this.roomId = await this.generateRoomCode();
 
     this.onMessage(MSG.input, (client, payload: unknown) => {
-      if (!this.guard(client)) return;
       if (this.state.phase !== 'running') return;
       const input = sanitizeInput(payload);
       if (!input) return this.reject(client);
@@ -146,7 +212,6 @@ export class HoldRoom extends Room<{ state: HoldState }> {
     });
 
     this.onMessage(MSG.ready, (client, payload: unknown) => {
-      if (!this.guard(client)) return;
       const ready =
         typeof payload === 'object' && payload !== null && !Array.isArray(payload)
           ? (payload as Record<string, unknown>).ready
@@ -158,19 +223,19 @@ export class HoldRoom extends Room<{ state: HoldState }> {
     });
 
     this.onMessage(MSG.start, (client) => {
-      if (!this.guard(client) || !this.isHost(client)) return;
+      if (!this.isHost(client)) return;
       this.accept(client);
       this.startRun();
     });
 
     this.onMessage(MSG.restart, (client) => {
-      if (!this.guard(client) || !this.isHost(client)) return;
+      if (!this.isHost(client)) return;
       this.accept(client);
       this.backToLobby('aborted');
     });
 
     this.onMessage(MSG.kick, (client, payload: unknown) => {
-      if (!this.guard(client) || !this.isHost(client)) return;
+      if (!this.isHost(client)) return;
       const id =
         typeof payload === 'object' && payload !== null && !Array.isArray(payload)
           ? (payload as Record<string, unknown>).sessionId
@@ -179,26 +244,28 @@ export class HoldRoom extends Room<{ state: HoldState }> {
       this.accept(client);
       const target = this.clients.find((c) => c.sessionId === id);
       if (target && !this.hosts.has(id)) {
+        // A kicked LAN laptop cannot come straight back (audit 1, R2).
+        const ip = this.seatIps.get(id);
+        if (this.isLanAddress(ip)) this.kicks.block(ip, now());
         this.leaveReasons.set(id, 'kicked');
         target.leave(CLOSE.kicked);
       }
     });
 
     this.onMessage(MSG.addBot, (client) => {
-      if (!this.guard(client) || !this.isHost(client)) return;
+      if (!this.isHost(client)) return;
       if (!this.addBot()) return this.reject(client);
       this.accept(client);
     });
 
     this.onMessage(MSG.removeBots, (client) => {
-      if (!this.guard(client) || !this.isHost(client)) return;
+      if (!this.isHost(client)) return;
       if (this.state.phase !== 'lobby') return this.reject(client);
       this.accept(client);
       this.removeBots();
     });
 
     this.onMessage(MSG.perf, (client, payload: unknown) => {
-      if (!this.guard(client)) return;
       const id = client.sessionId;
       if (this.state.phase !== 'running' || !this.state.players.has(id)) return this.reject(client);
       const report = sanitizePerfReport(payload);
@@ -211,12 +278,14 @@ export class HoldRoom extends Room<{ state: HoldState }> {
     });
 
     this.onMessage('*', (client) => {
-      if (!this.guard(client)) return;
       const s = this.net.get(client.sessionId);
       if (s) s.unknown++;
     });
 
-    this.setTimestep((deltaMs) => this.ticker.advance(deltaMs));
+    this.setTimestep((deltaMs) => {
+      this.dropStalledReaders();
+      this.ticker.advance(deltaMs);
+    });
   }
 
   override onAuth(_client: Client, options: unknown, context: AuthContext): AuthResult {
@@ -227,25 +296,21 @@ export class HoldRoom extends Room<{ state: HoldState }> {
     }
     if (!this.hostSeen) throw new ServerError(403, JOIN_ERRORS.notHost);
     if (this.state.phase !== 'lobby') throw new ServerError(409, JOIN_ERRORS.inProgress);
+    const ip = typeof context.ip === 'string' ? context.ip : undefined;
+    if (this.isLanAddress(ip) && this.kicks.blocked(ip, now()))
+      throw new ServerError(403, JOIN_ERRORS.kickedWait);
     if (opts.botTicket !== undefined) {
       const botName = this.botTickets.consume(opts.botTicket, now());
-      if (botName !== null) return { role: 'player', name: botName, bot: true };
+      if (botName !== null) return { role: 'player', name: botName, bot: true, ip };
     }
     const n = sanitizeName(opts.name);
     if (!n.ok) throw new ServerError(400, JOIN_ERRORS.emptyName);
-    return { role: 'player', name: n.name };
+    return { role: 'player', name: n.name, ip };
   }
 
   override onJoin(client: Client, _options: unknown, auth: AuthResult): void {
-    this.net.set(client.sessionId, {
-      received: 0,
-      accepted: 0,
-      rejected: 0,
-      dropped: 0,
-      unknown: 0,
-      limiter: new RateLimiter(),
-    });
     if (auth.role === 'host') {
+      this.trackClient(client);
       this.hosts.add(client.sessionId);
       this.hostSeen = true;
       return;
@@ -256,6 +321,14 @@ export class HoldRoom extends Room<{ state: HoldState }> {
     const reserved = auth.bot ? 0 : this.botTickets.pending(now());
     if (this.state.players.size + reserved >= TUNING.lobby.maxPlayers)
       throw new ServerError(409, JOIN_ERRORS.full);
+    // One LAN laptop holds at most maxSeatsPerAddress seats (audit 1, R2).
+    if (this.isLanAddress(auth.ip)) {
+      if (seatsHeldBy(auth.ip, this.seatIps) >= TUNING.lobby.maxSeatsPerAddress)
+        throw new ServerError(409, JOIN_ERRORS.oneSeat);
+      this.seatIps.set(client.sessionId, auth.ip);
+    }
+    // Only now, once the join is accepted: a refused join leaves nothing behind.
+    this.trackClient(client);
     const names = [...this.state.players.values()].map((p) => p.name);
     const player = new PlayerState();
     player.name = uniqueName(auth.name ?? '', names);
@@ -269,6 +342,9 @@ export class HoldRoom extends Room<{ state: HoldState }> {
     const reason = this.leaveReasons.get(id) ?? (code === FORCED_CLOSE ? 'protocol' : 'left');
     this.leaveReasons.delete(id);
     this.net.delete(id);
+    this.seatIps.delete(id);
+    this.ackTimers.get(id)?.clear();
+    this.ackTimers.delete(id);
     this.bytesAtPerf.delete(id);
     this.reports.delete(id);
     if (this.hosts.delete(id)) {
@@ -291,6 +367,9 @@ export class HoldRoom extends Room<{ state: HoldState }> {
 
   override async onDispose(): Promise<void> {
     this.botTickets.clear();
+    this.kicks.clear();
+    for (const t of this.ackTimers.values()) t.clear();
+    this.ackTimers.clear();
     this.bots?.stop();
     this.bots = null;
     if (this.log) await this.endLog('aborted');
@@ -310,12 +389,52 @@ export class HoldRoom extends Room<{ state: HoldState }> {
 
   // ---- message guards ----
 
-  /** Counts the message and applies the rate limit. Returns false if it must be dropped. */
-  private guard(client: Client): boolean {
+  /** Starts the per-client stats and the JOIN ack timer, for an accepted join. */
+  private trackClient(client: Client): void {
+    const id = client.sessionId;
+    this.net.set(id, {
+      received: 0,
+      accepted: 0,
+      rejected: 0,
+      dropped: 0,
+      unknown: 0,
+      limiter: new RateLimiter(),
+      frames: 0,
+      framesSince: now(),
+    });
+    // A client that never acknowledges JOIN holds a seat and makes Colyseus queue its
+    // replies; it gets joinAckSec to do so (audit 1, R1).
+    const timer = this.clock.setTimeout(() => {
+      this.ackTimers.delete(id);
+      if (client.state === ClientState.JOINING) this.forceClose(client);
+    }, TUNING.lobby.joinAckSec * 1000);
+    this.ackTimers.set(id, timer);
+  }
+
+  /**
+   * Every frame from every client, before Colyseus sees it. Returns false to drop it.
+   * Order: the hard frame cap, the frame types our clients send, then the token bucket.
+   */
+  private gateFrame(client: Client, buffer: Uint8Array): boolean {
+    if (client.state === ClientState.LEAVING || client.state === ClientState.CLOSED) return false;
     const s = this.net.get(client.sessionId);
-    if (!s) return false;
-    s.received++;
+    if (!s || !buffer || buffer.length === 0) return this.forceClose(client);
     const t = now();
+    if (t - s.framesSince >= 1000) {
+      s.frames = 0;
+      s.framesSince = t;
+    }
+    if (++s.frames > TUNING.net.maxFramesPerSec) return this.forceClose(client);
+    const code = buffer[0]! & PROTOCOL_CODE_MASK;
+    const allowed = client.state === ClientState.JOINED ? FRAMES_WHEN_JOINED : FRAMES_WHILE_JOINING;
+    if (!allowed.has(code)) return this.forceClose(client);
+    if (code !== Protocol.ROOM_DATA) return true;
+    return this.guard(client, s, t);
+  }
+
+  /** Counts a game message and applies the rate limit. Returns false if it must be dropped. */
+  private guard(client: Client, s: NetState, t: number): boolean {
+    s.received++;
     if (s.limiter.allow(t)) return true;
     s.dropped++;
     if (s.limiter.shouldKick(t)) {
@@ -323,6 +442,22 @@ export class HoldRoom extends Room<{ state: HoldState }> {
       client.leave(CLOSE.flood);
     }
     return false;
+  }
+
+  /** Cuts a client off for breaking the protocol (close 4002, logged as `protocol`). Returns false. */
+  private forceClose(client: Client): false {
+    if (client.state === ClientState.LEAVING || client.state === ClientState.CLOSED) return false;
+    if (!this.leaveReasons.has(client.sessionId)) this.leaveReasons.set(client.sessionId, 'protocol');
+    client.leave(FORCED_CLOSE);
+    return false;
+  }
+
+  /** Drops a client whose unsent backlog passed the limit: it stopped reading (audit 1, O1). */
+  private dropStalledReaders(): void {
+    for (const c of this.clients) {
+      const backlog = (c.ref as { bufferedAmount?: unknown } | undefined)?.bufferedAmount;
+      if (typeof backlog === 'number' && backlog > TUNING.net.maxSendBacklogBytes) this.forceClose(c);
+    }
   }
 
   private accept(client: Client): void {

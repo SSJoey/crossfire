@@ -78,6 +78,8 @@ export const JOIN_ERRORS = {
   notHost: 'The host page only works on the host laptop.',
   tooManyJoins: 'Too many join attempts. Wait a few seconds and try again.',
   notAllowed: 'Not allowed.',
+  oneSeat: 'This laptop is already in the game.',
+  kickedWait: 'You were removed by the host. Try again in a minute.',
 } as const;
 
 /** WebSocket close codes the server uses (Colyseus reserves 4000–4010). */

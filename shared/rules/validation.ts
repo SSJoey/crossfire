@@ -105,41 +105,190 @@ function takeGraphemes(s: string, max: number): string {
   return out;
 }
 
-// Control characters (U+0085 next line among them), invisible format characters (including
-// bidi overrides and isolates) and the line and paragraph separators U+2028 / U+2029 (Zl, Zp:
-// JSON.stringify leaves them raw, and some log readers break lines on them; audit 1, F5),
-// except the zero-width joiner and non-joiner that emoji and some scripts need.
-const STRIP = /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/gu;
-const KEEP_FORMAT = new Set(['‌', '‍']);
+// Characters a name may not contain:
+// - control characters (U+0085 next line among them);
+// - invisible format characters, including bidi overrides and isolates;
+// - the line and paragraph separators U+2028 / U+2029 (Zl, Zp: JSON.stringify leaves them raw,
+//   and some log readers break lines on them; audit 1, F5);
+// - default-ignorable characters (render as nothing: Hangul fillers and the like; audit 1, R3);
+// - U+2800, the blank braille pattern (renders blank).
+// Exceptions, so emoji and real scripts keep working (see `keepJoiners`):
+// - the zero-width joiner and non-joiner, between two kept characters;
+// - variation selectors and emoji tag characters, right after a kept character.
+const STRIP = /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}\p{Default_Ignorable_Code_Point}\u{2800}]/u;
+const JOINER = /^[\u{200C}\u{200D}]$/u;
+/** Variation selectors and emoji tag characters: they modify the character before them. */
+function isAfterBase(c: string): boolean {
+  const cp = c.codePointAt(0) ?? 0;
+  return (
+    (cp >= 0xfe00 && cp <= 0xfe0f) || (cp >= 0xe0020 && cp <= 0xe007f) || (cp >= 0xe0100 && cp <= 0xe01ef)
+  );
+}
 const VISIBLE = /[\p{L}\p{N}\p{S}\p{P}]/u;
+const MARK = /^\p{M}$/u;
+
+/** Removes forbidden characters, keeping joiners and selectors only where they join something. */
+function keepJoiners(s: string): string {
+  const cps = [...s];
+  const out: string[] = [];
+  const plain = (c: string | undefined) => c !== undefined && !STRIP.test(c);
+  for (let i = 0; i < cps.length; i++) {
+    const c = cps[i]!;
+    if (!STRIP.test(c)) out.push(c);
+    else if (JOINER.test(c)) {
+      const prev = out[out.length - 1];
+      if (plain(prev) || (prev !== undefined && isAfterBase(prev))) {
+        // Keep it only if a plain character follows (skipping its own selectors).
+        let j = i + 1;
+        while (j < cps.length && isAfterBase(cps[j]!)) j++;
+        if (plain(cps[j])) out.push(c);
+      }
+    } else if (isAfterBase(c) && out.length > 0 && !JOINER.test(out[out.length - 1]!)) out.push(c);
+  }
+  return out.join('');
+}
+
+/** Keeps at most `maxMarks` combining marks in one grapheme. */
+function capMarks(segment: string, maxMarks: number): string {
+  let marks = 0;
+  let out = '';
+  for (const c of segment) {
+    if (MARK.test(c) && ++marks > maxMarks) continue;
+    out += c;
+  }
+  return out;
+}
 
 export type NameResult = { ok: true; name: string } | { ok: false };
 
-/** Cleans an untrusted player name. The result is plain text, to be rendered with textContent only. */
-export function sanitizeName(raw: unknown, maxLength = TUNING.lobby.maxNameLength): NameResult {
-  if (typeof raw !== 'string') return { ok: false };
-  // Bound work on absurd input before segmenting.
-  const bounded = raw.slice(0, maxLength * 64);
-  const cleaned = bounded.replace(STRIP, (c) => (KEEP_FORMAT.has(c) ? c : '')).trim();
-  const name = takeGraphemes(cleaned, maxLength).trim();
+/**
+ * Cleans an untrusted player name. The result is plain text, to be rendered with textContent only:
+ * well-formed, NFC, without invisible characters, at most `maxLength` graphemes, at most
+ * `maxMarksPerGrapheme` combining marks per grapheme and at most `maxNameUnits` UTF-16 units.
+ */
+export function sanitizeName(
+  raw: unknown,
+  maxLength = TUNING.lobby.maxNameLength,
+  lim = TUNING.lobby,
+): NameResult {
+  if (typeof raw !== 'string' || !raw.isWellFormed()) return { ok: false };
+  // Bound work on absurd input before normalising and segmenting.
+  const cleaned = keepJoiners(raw.slice(0, maxLength * 64).normalize('NFC')).trim();
+  let name = '';
+  let n = 0;
+  for (const { segment } of segmenter.segment(cleaned)) {
+    if (n >= maxLength) break;
+    const seg = capMarks(segment, lim.maxMarksPerGrapheme);
+    if (name.length + seg.length > lim.maxNameUnits) break;
+    name += seg;
+    n++;
+  }
+  name = name.trim();
   if (!VISIBLE.test(name)) return { ok: false };
   return { ok: true, name };
 }
 
-/** Adds " 2", " 3"… when the name is taken (case-insensitive), staying within the length cap. */
+/**
+ * Latin look-alikes from Cyrillic and Greek (lower case, as `skeleton` lower-cases first).
+ * Only for comparing names; nothing is ever displayed through it.
+ */
+const CONFUSABLE: Readonly<Record<string, string>> = Object.freeze({
+  // Cyrillic
+  '\u0430': 'a',
+  '\u0432': 'b',
+  '\u0435': 'e',
+  '\u0455': 's',
+  '\u0456': 'i',
+  '\u0458': 'j',
+  '\u043a': 'k',
+  '\u043c': 'm',
+  '\u043d': 'h',
+  '\u043e': 'o',
+  '\u0440': 'p',
+  '\u0441': 'c',
+  '\u0442': 't',
+  '\u0443': 'y',
+  '\u0445': 'x',
+  '\u04bb': 'h',
+  '\u0501': 'd',
+  '\u051b': 'q',
+  '\u051d': 'w',
+  '\u04cf': 'l',
+  '\u04af': 'y',
+  '\u0475': 'v',
+  // Greek
+  '\u03b1': 'a',
+  '\u03b2': 'b',
+  '\u03b5': 'e',
+  '\u03b6': 'z',
+  '\u03b7': 'h',
+  '\u03b9': 'i',
+  '\u03ba': 'k',
+  '\u03bc': 'm',
+  '\u03bd': 'n',
+  '\u03bf': 'o',
+  '\u03c1': 'p',
+  '\u03c4': 't',
+  '\u03c5': 'y',
+  '\u03c7': 'x',
+  '\u03f2': 'c',
+  // Latin
+  '\u0131': 'i',
+});
+const IGNORABLE = /\p{Default_Ignorable_Code_Point}/gu;
+
+/** What a name looks like, for duplicate checks: NFKC, lower case, no invisibles, look-alikes folded. */
+export function nameSkeleton(name: string): string {
+  let out = '';
+  for (const c of name.normalize('NFKC').toLowerCase().replace(IGNORABLE, '')) out += CONFUSABLE[c] ?? c;
+  return out;
+}
+
+/** Adds " 2", " 3"… when a name that looks the same is taken, staying within the length cap. */
 export function uniqueName(
   name: string,
   existing: Iterable<string>,
   maxLength = TUNING.lobby.maxNameLength,
 ): string {
   const taken = new Set<string>();
-  for (const e of existing) taken.add(e.toLowerCase());
-  if (!taken.has(name.toLowerCase())) return name;
+  for (const e of existing) taken.add(nameSkeleton(e));
+  if (!taken.has(nameSkeleton(name))) return name;
   for (let n = 2; ; n++) {
     const suffix = ` ${n}`;
     const base = takeGraphemes(name, maxLength - suffix.length).trimEnd();
     const candidate = base + suffix;
-    if (!taken.has(candidate.toLowerCase())) return candidate;
+    if (!taken.has(nameSkeleton(candidate))) return candidate;
+  }
+}
+
+/** Number of seats `ip` holds in a sessionId → address map. */
+export function seatsHeldBy(ip: string, seats: ReadonlyMap<string, string>): number {
+  let n = 0;
+  for (const a of seats.values()) if (a === ip) n++;
+  return n;
+}
+
+/** Addresses the host kicked, blocked from rejoining for `ms` (audit 1, R2). Expired ones are forgotten. */
+export class KickCooldown {
+  private readonly until = new Map<string, number>();
+
+  constructor(public ms = TUNING.lobby.kickCooldownSec * 1000) {}
+
+  get size(): number {
+    return this.until.size;
+  }
+
+  block(ip: string, nowMs: number): void {
+    this.until.set(ip, nowMs + this.ms);
+  }
+
+  blocked(ip: string, nowMs: number): boolean {
+    for (const [k, t] of this.until) if (nowMs >= t) this.until.delete(k);
+    return this.until.has(ip);
+  }
+
+  clear(): void {
+    this.until.clear();
   }
 }
 

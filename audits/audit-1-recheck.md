@@ -292,3 +292,16 @@ _Written after the checklist above was complete._
 | **Checklist 18 note** One LAN client can reserve all 8 seats and lock real players out | **Partly fixed** | `ReservationLimiter` allows 2 joins per LAN address per 5 s, and the reservation window is now 5 s (`validation.ts:225-249`, `guard.ts:68-69`, `HoldRoom.ts:79`, `tuning.ts:118-120`). An address can no longer hold 8 _unconnected_ reservations; live, the 3rd `joinById` inside the window got 429. But the limiter caps the join rate, not the seats held. An address that connects each reserved seat holds 8 real player seats after 15.2 s, and the next player gets "The game is full" (`probe-seatfill.mjs`). Kicks are not sticky. Now **R2**.                                                                                                                                                     |
 
 **Tests and lint on the audited tree.** `npm test` passes 38 files and 334 tests, `tests/regression/` included. `npm run lint` is clean. All regression tests pass but miss R1 and R2: they flood only above the frame cap, and they test the join rate rather than the seats held.
+
+---
+
+## Fixed (2026-11-08, round 2)
+
+| #   | Fix                                                                                                                                                                                                              | Regression test                            |
+| --- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------ |
+| R1  | `HoldRoom.gateFrame`: every frame passes our own frame cap, a frame-type allowlist (closes on anything our clients never send) and the token bucket. A client that doesn't acknowledge JOIN within 5 s is closed | `tests/regression/half-join.test.ts`       |
+| R2  | One player seat per LAN address; a kicked address waits 60 s; the host laptop is exempt                                                                                                                          | `tests/regression/seat-squat.test.ts`      |
+| R3  | Names: well-formed, NFC, invisible characters stripped (joiners only inside), at most 4 marks per character and 64 units; duplicate check by skeleton with a Cyrillic/Greek look-alike map                       | `tests/regression/name-lookalikes.test.ts` |
+| O1  | A client with over 1 MB unsent is dropped                                                                                                                                                                        | `tests/regression/slow-reader.test.ts`     |
+
+O2–O4 are parked for audit 3. Probe re-runs are in NOTES.md (2026-11-08, round 2).

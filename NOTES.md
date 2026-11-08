@@ -298,3 +298,60 @@ No new packages. `@colyseus/sdk` 0.18.9 (still the latest) moved from the server
 ### Open (found while re-testing, not an audit finding)
 
 - A player named `__proto__` is missing from the `kBps` and `clients` maps of `perf` lines, because those are plain objects keyed by name. Not a security issue (nothing else is affected), but the log loses that player's numbers. Possible fix: build the maps with `Object.create(null)`. Not done; for JCCJ.
+
+## 2026-11-08: Audit 1 fixes, round 2 (R1, R2, R3, O1)
+
+### Decisions (JCCJ, 2026-11-08)
+
+1. **One seat per LAN laptop** (`TUNING.lobby.maxSeatsPerAddress = 1`). The host laptop (loopback) is exempt, for bots and test tabs.
+2. **A kicked LAN laptop waits 60 s** (`kickCooldownSec`) before it can rejoin. The host laptop is exempt.
+3. **Look-alike names:** the duplicate check uses a skeleton (NFKC, lower case, invisible characters removed, plus a small map of about 40 Cyrillic/Greek letters that look Latin). The name shown stays exactly as typed.
+4. **O1 fixed now:** a client with more than 1 MB unsent (`TUNING.net.maxSendBacklogBytes`) is dropped.
+
+### What changed
+
+- **R1, our own frame gate (`HoldRoom.gateFrame`):** every frame from every client goes through it before Colyseus sees it. It does three things, in order:
+  - the hard cap of 240 frames/s, now counted by us and still closing with 4002;
+  - a check on the frame type: only the frames our clients actually send are allowed, and anything else closes the client with 4002 (log reason `protocol`). While joining that is the JOIN_ROOM ack and LEAVE_ROOM; once joined, ROOM_DATA and LEAVE_ROOM. PING, ROOM_REQUEST, ROOM_DATA_BYTES and the input frames are refused, because our clients never send them (checked in `@colyseus/sdk`: we never call `room.ping()`);
+  - the token bucket (60/s, 4020 kick after 3 s) for ROOM_DATA.
+
+  The message handlers no longer call `guard()`, so no frame is counted twice. Colyseus' own `maxMessagesPerSecond` stays as a second cap.
+
+- **The gate wraps a Colyseus internal:** `Room._onMessage`, which Colyseus binds per client right after `onJoin`. It's set in the `HoldRoom` constructor and typed through a cast. `tests/regression/half-join.test.ts` fails if a Colyseus upgrade changes this.
+- **JOIN ack timeout:** a client that hasn't acknowledged JOIN within 5 s (`TUNING.lobby.joinAckSec`) is closed and its seat freed.
+- **O1:** `dropStalledReaders()` runs on every room timestep and drops a client whose ws `bufferedAmount` is over 1 MB.
+- **R2:**
+  - `onAuth` returns the socket address (forged headers are already stripped by the guard). `onJoin` refuses a 2nd seat from one LAN address with `JOIN_ERRORS.oneSeat`.
+  - A kick blocks the address for 60 s (`KickCooldown`), refused with `JOIN_ERRORS.kickedWait`.
+  - Test hook: `HoldRoom.treatLoopbackAsLan`, set by `createApp({ lanClients: true })`, never in production.
+  - The join screen shows both new messages, with no auto-retry.
+- **Existing leak found and fixed:** `onJoin` used to create a client's stats entry before the "full" and "run in progress" checks, so every refused join left one entry behind. Entries are now made only for accepted joins.
+- **R3 (`sanitizeName`, `uniqueName`):**
+  - names must be well-formed (no lone surrogates) and are stored as NFC;
+  - default-ignorable characters and U+2800 are stripped. ZWJ/ZWNJ are kept only between two kept characters; variation selectors and emoji tags only right after one;
+  - at most 4 combining marks per character (`maxMarksPerGrapheme`), and at most 64 UTF-16 units per name (`maxNameUnits`);
+  - `nameSkeleton` is exported for the duplicate check.
+- **Changed existing test:** `tests/unit/shared/validation.test.ts`, emoji names. Twenty family emoji (11 UTF-16 units each) now stop at 5 because of the 64-unit cap, still never split. Twenty plain emoji still give 16.
+- `tsconfig.json` and `client/tsconfig.json` `lib` moved from ES2023 to **ES2024**, for `String.prototype.isWellFormed`. It's in Node 22 and in current Chrome.
+- **For 1f (reconnect):** a reconnecting player must be let back in by its own address while its old seat may still be held. The `reconnect` matchmaking method is also still refused by the guard.
+
+### Checks (2026-11-08)
+
+- New regression tests: `half-join`, `slow-reader`, `seat-squat`, `name-lookalikes`. They were written first and seen failing (23 failed).
+- Now 372 unit + integration + regression tests pass, along with 5 Playwright tests, lint and typecheck.
+- **Re-audit probes** against a production server on port 2671, from 192.168.1.11:
+  - half-joined 15 KB requests at 200/s: closed after 2 frames, RSS +1 MB (was +123 MB in 40 s, never closed);
+  - seat fill from one address: 1 seat held, and a real player still joined (was 8 seats in 15 s);
+  - 200/s PING or unknown requests: closed at once (was never kicked); 150/s game messages: 4020 after 4.4 s;
+  - names: the lone surrogate and joiner-only names refused, 900 marks cut to 4. `probe-names.mjs` itself doesn't parse (its special characters were mangled in the file), so `probe-names2.mjs` and the regression tests cover this;
+  - stalled reader: the server closed the socket and RSS stayed flat (+0.9 MB in 60 s);
+  - round 1's `t5_limits`, from loopback: every frame type closed, and the reflection socket closed after 200 frames with RSS flat.
+- O1 was proven by the regression test (which fakes a backlog over 1 MB). A real stalled reader needs many minutes to fill 1 MB plus the kernel buffers, so it wasn't run live; either way the memory is bounded.
+- **Parked for audit 3:** O2 (any web page in the host's own browser can connect as host: no Origin check), O3 (the server binds `0.0.0.0`), O4 (`/api/lan` lists Docker bridge addresses).
+
+## 2026-11-08: Third cold re-audit (`audits/audit-1-recheck-2.md`)
+
+- F1–F5, R1–R3 and O1 are all fixed (checked live, with floods both above and just under each limit). No high or medium findings.
+- **New: N1 (low).** The look-alike check misses plain-letter tricks (`AIice` vs `Alice`, `A1ice`) and some other scripts.
+- **JCCJ's decision:** commit round 2 now, then fix N1 in the next session, with a regression test written first. The default is the small ASCII pre-fold (I/1/| → l, 0 → o, rn → m) plus a few more scripts. Audit 1 stays open until N1 is fixed.
+- The reviewer's observations P1–P9 are in the report. Still to decide: whether the 6–9 s "already in the game" message after a silent Wi-Fi drop (P5), and the stack trace logged for each malformed frame, go into the N1 session.

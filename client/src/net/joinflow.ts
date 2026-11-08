@@ -4,7 +4,8 @@ import { CLOSE, JOIN_ERRORS, ROOM_CODE_LETTERS } from '@crossfire/shared/types';
 export const UNREACHABLE_MESSAGE =
   "Can't reach the host. Check that you're on the same Wi-Fi as the host laptop and that the code is right.";
 
-export type JoinFailureKind = 'full' | 'inProgress' | 'emptyName' | 'notHost' | 'unreachable' | 'unknown';
+export type JoinFailureKind =
+  'full' | 'inProgress' | 'emptyName' | 'notHost' | 'oneSeat' | 'kicked' | 'unreachable' | 'unknown';
 
 export interface JoinFailure {
   kind: JoinFailureKind;
@@ -41,6 +42,8 @@ export function classifyJoinError(err: unknown): JoinFailure {
   if (message === JOIN_ERRORS.inProgress) return { kind: 'inProgress', message, retryMs: retry };
   if (message === JOIN_ERRORS.emptyName) return { kind: 'emptyName', message, retryMs: null };
   if (message === JOIN_ERRORS.notHost) return { kind: 'notHost', message, retryMs: null };
+  if (message === JOIN_ERRORS.oneSeat) return { kind: 'oneSeat', message, retryMs: null };
+  if (message === JOIN_ERRORS.kickedWait) return { kind: 'kicked', message, retryMs: null };
   if (code === undefined || code === 0 || NO_ROOM_CODES.has(code)) {
     return { kind: 'unreachable', message: UNREACHABLE_MESSAGE, retryMs: retry };
   }
