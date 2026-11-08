@@ -246,3 +246,7 @@ No new packages. `@colyseus/sdk` 0.18.9 (still the latest) moved from the server
 - After the tests no bot process was left running.
 - A production server (`npm run server`) added a bot from a scripted host page (`tools/host-bot-check.ts`).
 - `bash tools/docker-check.sh` needs sudo: **to run by JCCJ**.
+
+## 2026-11-07: Security audit 1 (JCCJ)
+
+- **Deviation from the brief:** audit 1 runs as a cold subagent started from a Claude Code session, not as a separate fresh session. The subagent gets only the prompt from `audits/audit-1.md`, none of the session's conversation, plus one line on where to put scratch scripts, which ports to avoid and to stop what it starts. The report goes to `audits/audit-1-findings.md`.
