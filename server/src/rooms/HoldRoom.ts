@@ -1,4 +1,4 @@
-import { type AuthContext, type Client, Room, ServerError } from '@colyseus/core';
+import { type AuthContext, type Client, CloseCode, Room, ServerError } from '@colyseus/core';
 import { loadTuning } from '@crossfire/shared/rules/loadtest';
 import {
   isLoopbackAddress,
@@ -52,6 +52,9 @@ export interface NetStats {
 
 const CODES_CHANNEL = '$holdcodes';
 
+/** Colyseus closes a client with this when it breaks the protocol or the frame cap. */
+const FORCED_CLOSE = CloseCode.WITH_ERROR;
+
 function now(): number {
   return performance.now();
 }
@@ -68,6 +71,12 @@ export class HoldRoom extends Room<{ state: HoldState }> {
   static botUrl: string | undefined;
 
   override maxClients = TUNING.lobby.maxPlayers + TUNING.lobby.maxHostConnections;
+  /**
+   * Colyseus counts every frame here, PING and pre-join frames included, and cuts a client off
+   * over the cap (close 4002). Our own token bucket below handles the range under it (audit 1, F3/F4).
+   */
+  override maxMessagesPerSecond = TUNING.net.maxFramesPerSec;
+  override seatReservationTimeout = TUNING.lobby.seatReservationSec;
   override state = new HoldState();
   /** Created in onCreate, from worldOptions(). */
   world!: World;
@@ -255,9 +264,9 @@ export class HoldRoom extends Room<{ state: HoldState }> {
     this.state.playerCount = this.state.players.size;
   }
 
-  override onLeave(client: Client): void {
+  override onLeave(client: Client, code?: number): void {
     const id = client.sessionId;
-    const reason = this.leaveReasons.get(id) ?? 'left';
+    const reason = this.leaveReasons.get(id) ?? (code === FORCED_CLOSE ? 'protocol' : 'left');
     this.leaveReasons.delete(id);
     this.net.delete(id);
     this.bytesAtPerf.delete(id);

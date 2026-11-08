@@ -102,31 +102,47 @@ describe('network: input validation', () => {
 });
 
 describe('network: rate limit', () => {
-  it('1,000 messages in one second are rate-limited; a sustained flood is kicked; others unaffected', async () => {
+  // Changed 2026-11-07 (audit 1, F3): over TUNING.net.maxFramesPerSec a client is cut off at
+  // once by Colyseus' frame cap (close 4002); our token bucket handles the range below it.
+  it('1,000 messages in one second: the client is cut off by the frame cap; others unaffected', async () => {
     const { room, players } = await startRun(colyseus, ['A', 'B']);
     const [p, other] = [players[0]!, players[1]!];
-    const kicked = new Promise<number>((resolve) => p.onLeave((code) => resolve(code)));
+    const left = new Promise<number>((resolve) => p.onLeave((code) => resolve(code)));
     let seq = 1;
-    const t0 = Date.now();
     for (let i = 0; i < 1000; i++) {
       p.send(MSG.input, input(seq++));
       if (i % 50 === 49) await sleep(48);
     }
-    await until(() => room.netStats(p.sessionId)!.received >= 1000, 3000, 'all received');
-    const applied = room.netStats(p.sessionId)!.accepted;
-    const elapsed = (Date.now() - t0) / 1000;
-    expect(applied).toBeLessThanOrEqual(TUNING.net.burst + Math.ceil(TUNING.net.ratePerSec * elapsed) + 5);
-    expect(room.state.players.has(p.sessionId)).toBe(true);
+    expect(await Promise.race([left, sleep(3000).then(() => -1)])).toBe(4002);
+    await until(() => !room.state.players.has(p.sessionId), 3000, 'flooder removed');
+    expect(room.netStats(p.sessionId)).toBeUndefined();
+    other.send(MSG.input, input(1, { moveX: 1 }));
+    await until(() => room.world.heroes.get(other.sessionId)?.input.seq === 1, 3000, 'other still served');
+    expect(room.state.phase).toBe('running');
+  });
 
+  it('a sustained flood under the frame cap is rate-limited, then kicked with 4020; others unaffected', async () => {
+    expect(150).toBeLessThan(TUNING.net.maxFramesPerSec);
+    const { room, players } = await startRun(colyseus, ['A', 'B']);
+    const [p, other] = [players[0]!, players[1]!];
+    const kicked = new Promise<number>((resolve) => p.onLeave((code) => resolve(code)));
+    let seq = 1;
+    const stats = room.netStats(p.sessionId)!;
+    const t0 = Date.now();
     const flood = setInterval(() => {
-      for (let i = 0; i < 50; i++) p.send(MSG.input, input(seq++));
-    }, 50);
+      for (let i = 0; i < 15; i++) p.send(MSG.input, input(seq++));
+    }, 100);
     try {
       const code = await Promise.race([kicked, sleep(8000).then(() => -1)]);
       expect(code).toBe(4020);
     } finally {
       clearInterval(flood);
     }
+    const elapsed = (Date.now() - t0) / 1000;
+    expect(stats.dropped).toBeGreaterThan(0);
+    expect(stats.accepted).toBeLessThanOrEqual(
+      TUNING.net.burst + Math.ceil(TUNING.net.ratePerSec * elapsed) + 5,
+    );
     await until(() => !room.state.players.has(p.sessionId), 3000, 'flooder removed');
     other.send(MSG.input, input(1, { moveX: 1 }));
     await until(() => room.world.heroes.get(other.sessionId)?.input.seq === 1, 3000, 'other still served');

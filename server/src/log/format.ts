@@ -5,7 +5,8 @@ import { ROOM_CODE_LETTERS, type PerfReport } from '@crossfire/shared/types';
  * Names only: never an IP address or a session id.
  */
 export type EndReason = 'wiped' | 'aborted' | 'empty';
-export type LeaveReason = 'left' | 'kicked' | 'flooded';
+/** `protocol`: Colyseus cut the client off (over the frame cap or a protocol error). */
+export type LeaveReason = 'left' | 'kicked' | 'flooded' | 'protocol';
 
 export type LogEvent =
   | { ev: 'start'; at: string; code: string; seed: number; players: string[]; bots: string[] }

@@ -5,6 +5,7 @@ import { defineRoom, defineServer } from '@colyseus/core';
 import { WebSocketTransport } from '@colyseus/ws-transport';
 import { LOAD_ROOM_NAME, ROOM_NAME } from '@crossfire/shared/types';
 import express from 'express';
+import { GuardedServer } from './http/guard';
 import { lanAddresses } from './lan';
 import { HoldRoom, LoadHoldRoom, RemoteOnlyHoldRoom } from './rooms/HoldRoom';
 
@@ -20,6 +21,8 @@ export interface AppOptions {
   botUrl?: string;
   /** Folder with the built client to serve. Skipped when it does not exist (development). */
   clientDir?: string;
+  /** Tests only: the HTTP guard treats every caller as a LAN laptop. Never set in production. */
+  lanClients?: boolean;
 }
 
 export function createApp(opts: AppOptions = {}) {
@@ -31,7 +34,11 @@ export function createApp(opts: AppOptions = {}) {
       ...(opts.testRooms ? { hold_remote: defineRoom(RemoteOnlyHoldRoom) } : {}),
       ...(opts.loadRooms ? { [LOAD_ROOM_NAME]: defineRoom(LoadHoldRoom) } : {}),
     },
-    transport: new WebSocketTransport({ maxPayload: 16 * 1024 }),
+    // Our own HTTP server guards the LAN boundary before Colyseus sees anything (audit 1).
+    transport: new WebSocketTransport({
+      server: new GuardedServer({ lanClients: opts.lanClients === true }),
+      maxPayload: 16 * 1024,
+    }),
     greet: false,
     express: (app) => {
       app.disable('x-powered-by');

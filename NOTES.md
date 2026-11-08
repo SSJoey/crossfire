@@ -250,3 +250,51 @@ No new packages. `@colyseus/sdk` 0.18.9 (still the latest) moved from the server
 ## 2026-11-07: Security audit 1 (JCCJ)
 
 - **Deviation from the brief:** audit 1 runs as a cold subagent started from a Claude Code session, not as a separate fresh session. The subagent gets only the prompt from `audits/audit-1.md`, none of the session's conversation, plus one line on where to put scratch scripts, which ports to avoid and to stop what it starts. The report goes to `audits/audit-1-findings.md`.
+
+### Fix decisions (JCCJ, 2026-11-07)
+
+1. **Frame cap 240/s, hard.** Colyseus' `maxMessagesPerSecond` is set to `TUNING.net.maxFramesPerSec` (240). Every frame counts: PING, unknown requests, frames before the JOIN ack. A client over the cap is cut off at once (close 4002), and the log's `left` line gives the new reason **`protocol`**. Our token bucket (60/s, burst 120, kick 4020 after 3 s) stays for traffic under 240/s.
+2. **Seat griefing fixed now**, not parked: at most **2 joins per LAN address per reservation window**, and the window is **5 s** (Colyseus default 15 s). The host laptop (loopback) is exempt, so bots and the host's own test tabs are not limited.
+
+## 2026-11-08: Audit 1 fixes, build notes
+
+### What changed
+
+- **One LAN boundary in front of Colyseus:** `server/src/http/guard.ts` (`GuardedServer`, our own `http.Server` handed to `WebSocketTransport`). Colyseus answers `POST /matchmake/*` before Express and reads the body with no limit, so Express middleware could not guard it.
+  - **F1:** on every request and WebSocket upgrade it deletes `x-real-ip`, `x-forwarded-for` and `x-client-ip`. There is no proxy, so these are always forged, and Colyseus then falls back to the real socket address for `context.ip`.
+  - **F2:** the only write route is `POST /matchmake/<method>/<room>` with method `create` (host laptop only) or `joinById`. Any other spelling gets 404, other matchmaking methods (`join`, `joinOrCreate`, `reconnect`…) 403, and other HTTP write methods 405. The body must declare its length: missing or chunked gets 411, over 16 KB gets 413, and the guard closes the connection without reading the body. Pure rule: `matchmakeGate` in `shared/rules/validation.ts`.
+  - **Seat griefing:** `ReservationLimiter` (same file) returns 429 with `JOIN_ERRORS.tooManyJoins`. The join screen shows that text as an "unknown" failure without auto-retry.
+- **F3 + F4:** `HoldRoom.maxMessagesPerSecond = 240` and `seatReservationTimeout = 5`. A forced close (4002) is logged as `protocol`.
+- **F5:** the name filter also strips the Unicode categories Zl and Zp (U+2028, U+2029). U+0085 was already stripped as a control character.
+- **For 1f:** reconnect will need `reconnect` added to the allowed matchmaking methods in `matchmakeGate`.
+- **Test-only option** `createApp({ lanClients: true })`: the guard treats every caller as a LAN laptop, so the LAN rules can be tested from loopback. It is never set in production.
+- **Changed existing test:** `tests/integration/network.test.ts`. The 1,000-messages-in-one-second case now expects the frame-cap cut-off (4002). A new 150/s sustained flood checks drops and the 4020 kick after about 3 s.
+- `ws` 8.22.1 and `@types/ws` 8.18.2 (latest, npm registry 2026-11-07) are now declared root dev dependencies, for the raw-socket regression tests. They were already installed through Colyseus.
+
+### Checks (2026-11-08)
+
+- Regression tests in `tests/regression/`: `host-spoof`, `matchmake-gate`, `matchmake-lan`, `frame-flood`, `name-separators`. They were written first and seen failing.
+- All unit, integration and regression tests pass, along with 5 Playwright tests, lint and typecheck.
+- **Audit scripts re-run** against a production server from the laptop's LAN address (192.168.1.11):
+  - spoofed host refused on every header
+  - 0 rooms from a 20 s create flood (67,802 refused), RSS flat at about 119 MB
+  - 16 MB and 128 MB bodies dropped unread
+  - 3rd seat reservation refused (429)
+  - every flooded frame type closed in about 80 ms
+  - the half-joined 16 KB-reflection socket closed after 600 frames (RSS 130 → 154 MB at peak, was 133 → 856 MB)
+  - no U+2028 in the log
+  - The frame and log scripts ran from loopback, because the per-IP join cap now stops the scripts' many joins from one LAN address.
+
+### Re-audit (2026-11-08, cold subagent, `audits/audit-1-recheck.md`): audit 1 not passed yet
+
+- **Correction:** the build notes above claim F4 is fixed. **It isn't.** The 240/s cap only stops fast floods. At 200 frames/s, a client that never sends the JOIN ack still grows server memory by about 3 MB/s, without bound. `frame-flood.test.ts` only floods at 1,000/s, so it missed this. My check of the audit scripts had the same blind spot.
+- Confirmed fixed: F1, F2 and F5. Partly fixed: F3 (the frames still skip the token bucket under the cap) and checklist 18.
+- **New findings**, still to fix, each with a regression test first:
+  - **R1 (high):** the half-joined reply queue and unbucketed frames under the cap (the earlier F3/F4).
+  - **R2 (medium):** one LAN address can fill all 8 seats within about 15 s, because only join attempts are capped, not the seats it holds.
+  - **R3 (low):** look-alike names skip the duplicate suffix. Blank-looking names are accepted, a lone surrogate is stored differently from how clients show it, and one character can carry hundreds of combining marks.
+- For audit 3: Colyseus echoes any Origin and doesn't check Origin on WebSocket upgrades, so a web page in the host laptop's browser could act as host. Also the server binds to `0.0.0.0`, and `/api/lan` lists Docker bridge addresses.
+
+### Open (found while re-testing, not an audit finding)
+
+- A player named `__proto__` is missing from the `kBps` and `clients` maps of `perf` lines, because those are plain objects keyed by name. Not a security issue (nothing else is affected), but the log loses that player's numbers. Possible fix: build the maps with `Object.create(null)`. Not done; for JCCJ.

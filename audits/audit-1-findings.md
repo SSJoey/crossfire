@@ -6,15 +6,15 @@
 
 ## Summary
 
-| # | Finding | Severity |
-|---|---------|----------|
-| F1 | Any LAN client becomes "host" by spoofing an `X-Real-IP` / `X-Forwarded-For` / `X-Client-IP` header: full start/restart/kick/addBot/removeBots control | **HIGH** |
-| F2 | Unauthenticated room creation + no HTTP body cap → one LAN laptop drives server RSS to multiple GB (OOM) in seconds | **MEDIUM** |
-| F3 | The per-client token bucket never sees `PING`, `ROOM_INPUT`, unknown `ROOM_REQUEST`, or empty/invalid-code frames; a client floods them at ~3,600/s forever without being kicked, and PING floods are reflected as PONGs | **MEDIUM** |
-| F4 | A client that reserves a seat and opens the socket but never sends the JOIN ack makes the room buffer every reply (incl. reflected 16 KB request-type names) in memory, unbounded, never kicked | **MEDIUM** |
-| F5 | `U+2028` / `U+2029` (line/paragraph separators) survive name sanitising and are written raw into match-log names; a log reader that splits on Unicode line boundaries sees forged extra lines | **LOW** |
+| #   | Finding                                                                                                                                                                                                                  | Severity   |
+| --- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------- |
+| F1  | Any LAN client becomes "host" by spoofing an `X-Real-IP` / `X-Forwarded-For` / `X-Client-IP` header: full start/restart/kick/addBot/removeBots control                                                                   | **HIGH**   |
+| F2  | Unauthenticated room creation + no HTTP body cap → one LAN laptop drives server RSS to multiple GB (OOM) in seconds                                                                                                      | **MEDIUM** |
+| F3  | The per-client token bucket never sees `PING`, `ROOM_INPUT`, unknown `ROOM_REQUEST`, or empty/invalid-code frames; a client floods them at ~3,600/s forever without being kicked, and PING floods are reflected as PONGs | **MEDIUM** |
+| F4  | A client that reserves a seat and opens the socket but never sends the JOIN ack makes the room buffer every reply (incl. reflected 16 KB request-type names) in memory, unbounded, never kicked                          | **MEDIUM** |
+| F5  | `U+2028` / `U+2029` (line/paragraph separators) survive name sanitising and are written raw into match-log names; a log reader that splits on Unicode line boundaries sees forged extra lines                            | **LOW**    |
 
-Everything else on the checklist passed (details below). The authoritative-sim input validation, name HTML-safety, seat cap, bot ticket/lifecycle, and loopback *logic* are all solid — the host check's only flaw is **which** address it trusts.
+Everything else on the checklist passed (details below). The authoritative-sim input validation, name HTML-safety, seat cap, bot ticket/lifecycle, and loopback _logic_ are all solid — the host check's only flaw is **which** address it trusts.
 
 ---
 
@@ -35,8 +35,13 @@ if (opts.role === 'host') {
 
 ```js
 function resolveClientIp(headers, remoteAddress) {
-  const firstHop = (name) => readHeader(headers, name)?.split(",")[0].trim() || void 0;
-  return firstHop("x-real-ip") ?? firstHop("x-forwarded-for") ?? firstHop("x-client-ip") ?? (remoteAddress || void 0);
+  const firstHop = (name) => readHeader(headers, name)?.split(',')[0].trim() || void 0;
+  return (
+    firstHop('x-real-ip') ??
+    firstHop('x-forwarded-for') ??
+    firstHop('x-client-ip') ??
+    (remoteAddress || void 0)
+  );
 }
 ```
 
@@ -87,9 +92,10 @@ Keep `isHostAddress`/`isLoopbackAddress` as they are. The test double `RemoteOnl
 
 **Checklist:** items 8, 18, 19.
 
-**Where.** `server/src/app.ts:28-33` registers `hold` with `defineRoom(HoldRoom)` and no create guard; `onAuth` only gates *players/host*, not room creation itself. A `POST /matchmake/create/hold` with any body creates a fresh room before any socket or auth. There is also no body-size limit on the matchmaking endpoint (`maxPayload: 16*1024` applies only to the WebSocket transport, not to Express/better-call HTTP bodies).
+**Where.** `server/src/app.ts:28-33` registers `hold` with `defineRoom(HoldRoom)` and no create guard; `onAuth` only gates _players/host_, not room creation itself. A `POST /matchmake/create/hold` with any body creates a fresh room before any socket or auth. There is also no body-size limit on the matchmaking endpoint (`maxPayload: 16*1024` applies only to the WebSocket transport, not to Express/better-call HTTP bodies).
 
 **Reproduction.**
+
 - Create-flood (`scratchpad/audit-1/t3_flood.mjs`): one LAN client, 20 concurrent `POST /matchmake/create/hold`, 20 s → **11,311 rooms created, 0 refused**, server RSS climbed from ~105 MB to **1,338 MB**; `/api/lan` latency rose to ~83 ms. Rooms auto-dispose (RSS fell back after the flood), so it is a spike rather than a permanent leak, but it is trivially sustainable — hold the flood and RSS stays pinned.
 - Large bodies (`t6_body.mjs`): 4 concurrent `POST /matchmake/create/hold` each with a 64 MB JSON name are all accepted (200); server RSS reached **2,369 MB** in ~60 s (test self-limited at 6 GB). A 128 MB single body is also accepted. The body is buffered and `merge`d into `clientOptions`, so a handful of parallel large requests can push the 16 GB reference laptop to OOM.
 - Combined impact run (`t8_impact.mjs`): during a live 7-player run, the create-flood and big-body stages drove RSS to **1.4 GB then 2.2 GB**. The sim tick itself stayed healthy (p95 ≤ 0.7 ms) — the damage is memory/GC and the matchmaking thread, not tick time — but at OOM the whole process (and everyone's game) dies.
@@ -97,6 +103,7 @@ Keep `isHostAddress`/`isLoopbackAddress` as they are. The test double `RemoteOnl
 **Impact.** Any LAN laptop can OOM-kill the host server, ending the game for all 8 players, with a few lines of `fetch`. No crash of an individual room, but a crash of the process.
 
 **Proposed fix.** Two independent limits:
+
 1. Cap matchmaking body size. Mount a small JSON size guard on the matchmaking path (e.g. reject `Content-Length` over a few KB before parsing), or put the known-tiny create/join options behind a size check. 16 KB (the WS payload cap) is a reasonable ceiling and matches `sanitizeName`'s own bound.
 2. Bound concurrent/owned rooms. The only legitimate room creator is the host page (loopback). Once F1 is fixed so `role:'host'` truly requires loopback, gate `create` on the same loopback check (reject remote `create` outright — a LAN player only ever `joinById`s an existing code, per `client/src/net/connection.ts`). That removes remote room creation entirely. A per-source-IP create rate/concurrency cap is a belt-and-braces addition.
 
@@ -108,7 +115,8 @@ Keep `isHostAddress`/`isLoopbackAddress` as they are. The test double `RemoteOnl
 
 **Checklist:** item 17 (partial fail).
 
-**Where.** The token bucket (`shared/rules/validation.ts:148` `RateLimiter`, applied in `HoldRoom.guard`, `HoldRoom.ts:305`) only runs inside the registered `onMessage` handlers and the `'*'` wildcard — i.e. only for `ROOM_DATA` / `ROOM_DATA_BYTES` / `ROOM_REQUEST` frames whose type has a handler or hits `'*'`. Colyseus' own per-second cap is **off**: `room.maxMessagesPerSecond` defaults to `Infinity` (`node_modules/@colyseus/core/build/Room.mjs:80`), and the room never sets it. So frames handled *below* the dispatch layer are unlimited:
+**Where.** The token bucket (`shared/rules/validation.ts:148` `RateLimiter`, applied in `HoldRoom.guard`, `HoldRoom.ts:305`) only runs inside the registered `onMessage` handlers and the `'*'` wildcard — i.e. only for `ROOM_DATA` / `ROOM_DATA_BYTES` / `ROOM_REQUEST` frames whose type has a handler or hits `'*'`. Colyseus' own per-second cap is **off**: `room.maxMessagesPerSecond` defaults to `Infinity` (`node_modules/@colyseus/core/build/Room.mjs:80`), and the room never sets it. So frames handled _below_ the dispatch layer are unlimited:
+
 - `PING` (0x12) → answered with a PONG every time (`Room.mjs` `_onMessage`), never counted.
 - `ROOM_INPUT_RELIABLE`/`UNRELIABLE` (0x13?/0x14 → 19/20) → routed to `_inputController`, which is absent, so silently dropped but never counted/kicked.
 - `ROOM_REQUEST` (21) for an **unknown** type → replies with an error frame, handled in `RoomMessages.onRequest` **before** any room handler, never counted.
@@ -170,6 +178,7 @@ empty frame               → NOT KICKED
 ## Checklist results
 
 ### Network input
+
 1. **PASS** — unknown types counted + dropped via `'*'` (`HoldRoom.ts:204`); verified garbage never crashes the room (`t4_frames.mjs`, `network.test.ts`).
 2. **PASS** — `sanitizeInput` (`validation.ts:16`) rejects NaN/±Inf/`|x|>1e4`/strings/arrays/missing keys; move vector clamped to len 1, aim clamped to `mapRadius`. Confirmed live: `(3,4)`→length 1, 24 bad inputs all rejected, hero coords stay finite.
 3. **PASS** — `seq` must be integer in `[0, 2^31-1]`; `acceptSeq` enforces strictly-increasing (`world.ts setInput`). A uint64 `seq` (`0xffff…`) is rejected; out-of-order 5→3→4 keeps 5 (verified).
@@ -178,32 +187,37 @@ empty frame               → NOT KICKED
 6. **PASS** — `onAuth`/`onJoin` tolerate any `options` shape: non-object coerced to `{}`, bad `botTicket`/`name`/`role` never throw (verified `null`/array/number/`{toString}` bodies and tickets all handled). Prototype-pollution attempts (`__proto__`, `constructor.prototype`) via create/join body had no effect (Colyseus `merge` skips `__proto__`, `Utils.mjs:80`).
 
 ### Trust boundaries
+
 7. **FINDING F1** (logic correct, source of IP wrong).
-8. **FINDING** — covered by F1 (host) + F2 (remote room creation). `hold_load`/`hold_remote` are correctly *not* registered in production (`create hold_load`→520 "not defined", verified). A LAN client cannot join a room whose code it doesn't know (no listing — see 11), but it *can* create its own rooms (F2).
+8. **FINDING** — covered by F1 (host) + F2 (remote room creation). `hold_load`/`hold_remote` are correctly _not_ registered in production (`create hold_load`→520 "not defined", verified). A LAN client cannot join a room whose code it doesn't know (no listing — see 11), but it _can_ create its own rooms (F2).
 9. **PASS** — `hold_load` only with `CROSSFIRE_LOAD_ROOM=1` (`index.ts:8`, `app.ts:32`); nothing in `docker-compose.yml`/`Dockerfile` sets it (asserted by `tests/unit/tools/docker.test.ts`); only `tools/load-test.ts:58` sets it.
 10. **PASS** (within the role model) — inputs are keyed by the sender's own `client.sessionId` server-side (`HoldRoom.ts:136`), never a client-supplied id; `kick` is host-only. The one cross-player action (kick) is gated by the host check, so its weakness is entirely F1.
-11. **PASS** — no room-listing/monitor/playground routes exposed. Probed `/matchmake`, `/matchmake/hold`, `/rooms`, `/monitor`, `/playground`, `/api/reference`, `/__stats` → all 404 (served the SPA index). `/__healthcheck`→200 "OK" (no data). `POST /matchmake/join/hold` and `/matchmake/joinOrCreate/hold` *do* let a codeless client land in an existing public room — acceptable for join-by-matchmaking but note it means "knowing a code" isn't strictly required to reach the single active room; worth locking join to `joinById` only once F2's create-gate lands.
+11. **PASS** — no room-listing/monitor/playground routes exposed. Probed `/matchmake`, `/matchmake/hold`, `/rooms`, `/monitor`, `/playground`, `/api/reference`, `/__stats` → all 404 (served the SPA index). `/__healthcheck`→200 "OK" (no data). `POST /matchmake/join/hold` and `/matchmake/joinOrCreate/hold` _do_ let a codeless client land in an existing public room — acceptable for join-by-matchmaking but note it means "knowing a code" isn't strictly required to reach the single active room; worth locking join to `joinById` only once F2's create-gate lands.
 12. **PASS** — static serving via `express.static(clientDir)` with `/` and `/host` → `index.html`; `/.env`, `/package.json`, `/api/rooms` → 404. `express.static` already normalises `..`/encoded dots. `/api/lan` returns only private IPv4 (`lan.ts privateRank`), verified `["192.168.1.6","172.16.0.2","172.18.0.1"]` — no public IPs, no hostnames. (Symlink traversal not exercised; `express.static` default `dotfiles:'ignore'` + path normalisation is standard-safe.)
-13. **PASS** — synced state (`rooms/state.ts`) carries only gameplay fields. The RNG seed is server-only (`World.rng`), *except* the match **log** records `seed` — but the log stays on the host, not sent to clients. No other-player inputs are broadcast. (Session ids are visible in the `players` map keys, which is how kick targeting works; that's inherent to Colyseus schema maps, low concern on LAN.)
+13. **PASS** — synced state (`rooms/state.ts`) carries only gameplay fields. The RNG seed is server-only (`World.rng`), _except_ the match **log** records `seed` — but the log stays on the host, not sent to clients. No other-player inputs are broadcast. (Session ids are visible in the `players` map keys, which is how kick targeting works; that's inherent to Colyseus schema maps, low concern on LAN.)
 
 ### Name handling
+
 14. **PASS with F5 caveat** — trimmed, capped at 16 graphemes (emoji x20→16 graphemes/32 UTF-16; family emoji→5 graphemes), control+bidi stripped (bidi `a‮…`→`abcde`), empty/whitespace/combining-only/PUA/unassigned/non-string all refused, zalgo bounded by the `maxLength*64` pre-slice (1000 combining marks → 1 grapheme, fast). **Gap:** `U+2028`/`U+2029`/`U+0085` survive (F5).
 15. **PASS** — all DOM text goes through `textContent` (`client/src/dom.ts:20,31`); no `innerHTML`/`insertAdjacentHTML`/`outerHTML`/`document.write`/`.html()`/`srcdoc`/template-string HTML anywhere in `client/src` or `client/index.html` (grep clean). Names in join screen, lobby, host page, HUD (`game.ts:349 canRevive`), end screen all use `el({text})`/`setText`.
 16. **PASS with F5 caveat** — `logLine` = `JSON.stringify` + `\n`; a name like `"},{"ev":"x` is correctly escaped and stays one JSON object (verified every log line parses). Names never enter a file path (filename = ISO time + validated room code, `format.ts:55-57`; invalid codes throw). The only wrinkle is F5's `U+2028` line-splitting for naive readers.
 
 ### Rate limits and resource use
+
 17. **FINDING F3** — bucket works for game/lobby/unknown-type messages (flooder kicked with 4020 in ~3 s, verified, others unaffected) but misses raw protocol frames.
 18. **FINDING** — connection/join flood: the 8-player cap holds (9th player refused "game is full", `playerCount` never exceeds 8; verified), and seat reservations are re-checked synchronously in `onJoin` so simultaneous joins can't overshoot. **But** F2 (room creation) and F4 (reserved-unjoined buffering) are unbounded memory. Also noted: one LAN client can reserve all 8 seats via repeated `POST joinById` and lock out real players for the 15 s reservation window (verified: 9 reservations → room locked → genuine player refused 522 until seats lapsed ~14 s later; sustained re-reservation kept a human mostly locked out). Low-impact griefing, folds into the F2 create/rate-limit fix.
 19. **PASS (room maps) / FINDING (Colyseus buffers)** — room-owned maps are cleaned on leave: `net`, `bytesAtPerf`, `reports`, `leaveReasons`, `players`, hero/enemy/bolt states all `delete`d in `onLeave`/`backToLobby` (verified playerCount→0 and bot procs→0 after leaves; pools are fixed-size). The unbounded growth is Colyseus-side (F4), not the room's own maps.
 20. **PASS** — stalled/slow clients don't stall the sim. With 3 TCP clients that complete the handshake then stop reading (one never ponging, two ponging), a 90 s run kept tick p95 ≤ 0.55 ms, patch p95 ≤ 0.7 ms, steady ~106 MB RSS, and the run progressed normally for the good players (`t7_slow.mjs`). ws ping/retry terminates dead sockets; buffered writes to a slow socket are per-client and don't block the tick loop.
 
 ### Host-added bots and client perf reports (1a.4)
+
 21. **FINDING** — `addBot`/`removeBots` are host-only and lobby-only in code (`HoldRoom.ts:178-189`) and that logic is correct, but the host check is F1-defeatable, so a spoofed host adds/removes bots freely (verified). Cap integrity itself is sound: bots count against 8, pending tickets reserve seats (`onJoin` `reserved`), and a burst of 30 `addBot` + 6 racing humans settled at exactly 8 players with no overshoot (verified). In-run `addBot`/`removeBots` are ignored (verified).
 22. **PASS** — bot tickets are `crypto.randomUUID()`, one-shot, 10 s TTL (`tickets.ts`). A LAN client sending `botTicket` of every type (`1`, `null`, `{}`, `[]`, `true`, `''`, 5 KB string, `{toString}`, a bogus UUID) just joins as a normal, non-bot player — never marked `bot`, never throws (verified: all "joined as normal", player list shows no bot). Expired/blocked tickets free their seat (verified: a ticket blocked by a locked lobby lapsed after ~10 s and a later `addBot` succeeded). Being a bot confers no extra powers (bots only send `ready`/`input`).
 23. **PASS** — one bot process per room (`BotSupervisor`), started on first `addBot`, stopped when the last bot leaves (verified procs→0 after removeBots/kick-last-bot/bot-leave), when the last host page leaves (verified procs→0 after host left mid-run), and it never outlives the server: on `SIGKILL` of the server the bot process exited in **77 ms**, on `SIGTERM` in **78 ms** (via `process.on('disconnect')`, `bots/process.ts:41`). Fork args/env/IPC carry only server-owned values (room code, generated `Bot N` name, ticket, server's own loopback `botUrl` from `index.ts:12-14`); nothing client-supplied reaches them.
 24. **PASS** — `sanitizePerfReport` (`validation.ts:62`) enforces exact keys, known tier, finite ranges (`TUNING.log`); accepted only from a player during `running` with ≤1 per 5 s, latest-only kept, cleared on leave (`HoldRoom.ts:191-202,466,264`). Verified: bad reports (fps 1e9, tier "ultra", non-integer w, extra key, string fps, `__proto__` key) all rejected; a second report inside the 5 s gap did not replace the first; report values that could break a log line are impossible (all numeric/enum). Bots send none.
 
 ### Logs and personal data
+
 25. **PASS** — logs contain names + gameplay only; a full run's log had **no** IP/session id (`/192\.168|127\.0\.0\.1|sessionId/` → no match, verified). `kBps`/`clients` perf maps are keyed by player **name**, not id (`writePerf`). Logs are written to `./logs` on the host (`MatchLog`/`logDir`, Docker-mounted `./logs:/app/logs`). F5 is the only blemish (separator chars inside a name), not a leak of extra personal data.
 
 ---
@@ -216,3 +230,20 @@ empty frame               → NOT KICKED
 4. **F5** — strip `U+2028`/`U+2029`/`U+0085` in `sanitizeName`.
 
 Each pairs with the regression test named in its section, to be added under `tests/regression/` before 1b begins.
+
+---
+
+## Fixed (2026-11-08)
+
+| #   | Fix                                                                                                                  | Regression test                                                    |
+| --- | -------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------ |
+| F1  | `server/src/http/guard.ts` deletes `x-real-ip` / `x-forwarded-for` / `x-client-ip` on every request and upgrade      | `tests/regression/host-spoof.test.ts`                              |
+| F2  | Same guard: only `create` (loopback) and `joinById`, exact route, declared body ≤ 16 KB, other write methods refused | `tests/regression/matchmake-gate.test.ts`, `matchmake-lan.test.ts` |
+| 18  | At most 2 joins per LAN address per 5 s reservation window (`ReservationLimiter`); reservation window 15 → 5 s       | `tests/regression/matchmake-lan.test.ts`, `matchmake-gate.test.ts` |
+| F3  | `HoldRoom.maxMessagesPerSecond = 240` (every frame type); a forced close is logged as `protocol`                     | `tests/regression/frame-flood.test.ts`                             |
+| F4  | Same frame cap closes the half-joined socket within about 1 s                                                        | `tests/regression/frame-flood.test.ts`                             |
+| F5  | `sanitizeName` also strips Zl / Zp (U+2028, U+2029); U+0085 was already stripped as Cc                               | `tests/regression/name-separators.test.ts`                         |
+
+The audit's attack scripts were re-run against the fixed server; results are in NOTES.md (2026-11-08).
+
+**Re-audit (2026-11-08, `audits/audit-1-recheck.md`):** F1, F2 and F5 are confirmed fixed. **F3 is only partly fixed and F4 is not fixed**: the frame cap stops fast floods, but under 240/s a half-joined client still makes the server queue replies without bound, and those frames still skip the token bucket (now R1, high). Row 18 is partly fixed: join attempts are capped, but the seats one address holds are not (now R2). Audit 1 has **not** passed yet.

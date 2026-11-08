@@ -1,5 +1,5 @@
 import { TUNING } from '../tuning';
-import { GFX_TIERS, type GfxTier, type InputMessage, type PerfReport } from '../types';
+import { GFX_TIERS, JOIN_ERRORS, type GfxTier, type InputMessage, type PerfReport } from '../types';
 
 const INPUT_KEYS = ['seq', 'moveX', 'moveZ', 'aimX', 'aimZ', 'attack', 'revive'] as const;
 const MAX_SEQ = 2 ** 31 - 1;
@@ -105,9 +105,11 @@ function takeGraphemes(s: string, max: number): string {
   return out;
 }
 
-// Control characters and invisible format characters (including bidi overrides and isolates),
+// Control characters (U+0085 next line among them), invisible format characters (including
+// bidi overrides and isolates) and the line and paragraph separators U+2028 / U+2029 (Zl, Zp:
+// JSON.stringify leaves them raw, and some log readers break lines on them; audit 1, F5),
 // except the zero-width joiner and non-joiner that emoji and some scripts need.
-const STRIP = /[\p{Cc}\p{Cf}]/gu;
+const STRIP = /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/gu;
 const KEEP_FORMAT = new Set(['‌', '‍']);
 const VISIBLE = /[\p{L}\p{N}\p{S}\p{P}]/u;
 
@@ -180,6 +182,69 @@ export class RateLimiter {
     if (this.floodStart === null || this.lastDrop === null) return false;
     if (nowMs - this.lastDrop > this.quietMs) return false;
     return nowMs - this.floodStart >= this.floodKickMs;
+  }
+}
+
+export interface MatchmakeRequest {
+  /** The `<method>` in POST /matchmake/<method>/<room>. */
+  method: string;
+  /** The raw Content-Length header, if any. */
+  contentLength: string | undefined;
+  /** Sent with Transfer-Encoding (no declared length). */
+  chunked: boolean;
+  /** From the host laptop's own socket (not from any header). */
+  loopback: boolean;
+}
+
+export type GateResult = { ok: true } | { ok: false; status: number; error: string };
+
+/** Matchmaking methods the game uses: the host page creates, players join by code. */
+const MATCHMAKE_METHODS = new Set(['create', 'joinById']);
+
+/**
+ * Decides whether an untrusted matchmaking request may reach Colyseus (audit 1, F2).
+ * Only `create` (host laptop only) and `joinById`, with a declared body of at most `maxBodyBytes`.
+ */
+export function matchmakeGate(
+  req: MatchmakeRequest,
+  maxBodyBytes = TUNING.net.maxMatchmakeBodyBytes,
+): GateResult {
+  if (!MATCHMAKE_METHODS.has(req.method)) return { ok: false, status: 403, error: JOIN_ERRORS.notAllowed };
+  if (req.method === 'create' && !req.loopback) return { ok: false, status: 403, error: JOIN_ERRORS.notHost };
+  if (req.chunked || req.contentLength === undefined)
+    return { ok: false, status: 411, error: 'Length required.' };
+  if (!/^\d{1,10}$/.test(req.contentLength)) return { ok: false, status: 400, error: 'Bad length.' };
+  if (Number(req.contentLength) > maxBodyBytes) return { ok: false, status: 413, error: 'Too large.' };
+  return { ok: true };
+}
+
+/**
+ * At most `max` joins per address within `windowMs` (the seat reservation time), so one LAN
+ * laptop cannot hold every seat (audit 1, checklist 18). Idle addresses are forgotten.
+ */
+export class ReservationLimiter {
+  private readonly recent = new Map<string, number[]>();
+
+  constructor(
+    private readonly max = TUNING.lobby.maxReservationsPerIp,
+    private readonly windowMs = TUNING.lobby.seatReservationSec * 1000,
+  ) {}
+
+  /** Number of addresses remembered (for tests). */
+  get size(): number {
+    return this.recent.size;
+  }
+
+  allow(ip: string, nowMs: number): boolean {
+    for (const [k, times] of this.recent) {
+      while (times.length > 0 && nowMs - times[0]! >= this.windowMs) times.shift();
+      if (times.length === 0) this.recent.delete(k);
+    }
+    const times = this.recent.get(ip) ?? [];
+    if (times.length >= this.max) return false;
+    times.push(nowMs);
+    this.recent.set(ip, times);
+    return true;
   }
 }
 

@@ -98,6 +98,13 @@ export const TUNING = {
     floodQuietMs: 1000,
     staleInputMs: 250,
     maxAbsNumber: 1e4,
+    /**
+     * Hard cap on raw frames per client per second, of any kind (Colyseus maxMessagesPerSecond).
+     * Over it the client is cut off at once. A normal client sends about 20 (audit 1, F3/F4).
+     */
+    maxFramesPerSec: 240,
+    /** Largest matchmaking request body (bytes); join and create options are tiny (audit 1, F2). */
+    maxMatchmakeBodyBytes: 16 * 1024,
   },
 
   lobby: {
@@ -107,6 +114,10 @@ export const TUNING = {
     maxHostConnections: 4,
     /** A bot added from the host page must join within this time, or its seat is freed (s). */
     botTicketSec: 10,
+    /** A seat reserved over HTTP must be taken by its socket within this time (s). */
+    seatReservationSec: 5,
+    /** Joins one LAN address may start per seat-reservation window (the host laptop is exempt). */
+    maxReservationsPerIp: 2,
   },
 
   log: {
