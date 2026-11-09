@@ -82,3 +82,19 @@ describe('World basics', () => {
     }
   });
 });
+
+describe('World pause time (1b.3)', () => {
+  it('run duration excludes paused time', () => {
+    const w = new World({ seed: 1 });
+    w.addHero('a', 'a');
+    w.start(0);
+    w.step(TICK_MS);
+    // 30 s on the clock, 20 s of it paused: the run lasted 10 s.
+    w.addPausedTime(20_000);
+    w.heroes.get('a')!.hp = 0;
+    w.heroes.get('a')!.status = 'dead';
+    w.step(30_000);
+    const ended = w.events.find((e) => e.type === 'runEnded');
+    expect(ended).toMatchObject({ type: 'runEnded', durationSec: 10 });
+  });
+});

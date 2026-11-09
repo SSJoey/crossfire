@@ -1,6 +1,6 @@
 import type { HeroId } from '@crossfire/shared/heroes';
 import { CastLatch, debugHeroKey } from './cast';
-import { isGameKey, KeyState } from './keys';
+import { isGameKey, isPauseKey, KeyState } from './keys';
 
 /**
  * Keyboard and mouse listeners. Everything is released when the window loses focus or the tab
@@ -12,6 +12,8 @@ export class Controls {
   readonly cast = new CastLatch();
   /** Called for 1–4 in debug mode (?debug=1). */
   onDebugHero: ((hero: HeroId) => void) | null = null;
+  /** Called once per Esc press (stage 1b.3). */
+  onPause: (() => void) | null = null;
   /** Mouse position in normalised device coordinates (−1..1). */
   readonly ndc = { x: 0, y: 0 };
   attackHeld = false;
@@ -36,6 +38,7 @@ export class Controls {
       this.cast.keyDown(e.code, e.repeat);
       const hero = e.repeat ? null : debugHeroKey(e.code, this.debug);
       if (hero) this.onDebugHero?.(hero);
+      if (isPauseKey(e.code, e.repeat)) this.onPause?.();
     });
     on(window, 'keyup', (e: KeyboardEvent) => {
       this.keys.up(e.code);

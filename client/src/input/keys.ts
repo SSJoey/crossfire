@@ -11,10 +11,16 @@ const USED = new Set([
   'ArrowDown',
   'ArrowLeft',
   'ArrowRight',
+  'Escape',
 ]);
 
 export function isGameKey(code: string): boolean {
   return USED.has(code);
+}
+
+/** Esc asks to pause the run (stage 1b.3): once per press, never on a held key's repeat. */
+export function isPauseKey(code: string, repeat: boolean): boolean {
+  return code === 'Escape' && !repeat;
 }
 
 /**

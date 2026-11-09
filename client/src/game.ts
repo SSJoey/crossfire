@@ -10,6 +10,7 @@ import {
 } from '@crossfire/shared/heroes';
 import { assistRange, clampCast } from '@crossfire/shared/rules/abilities';
 import { assistTarget, type AimTarget } from '@crossfire/shared/rules/aim';
+import { pauseCooldownLeft } from '@crossfire/shared/rules/pause';
 import { TUNING } from '@crossfire/shared/tuning';
 import { MSG, type HeroStatus, type InputMessage } from '@crossfire/shared/types';
 import { debugView } from './debug';
@@ -140,7 +141,20 @@ export class Game {
     qCd: 0,
     eCd: 0,
     qHeld: false,
+    paused: false,
+    pausedBy: '',
+    myName: '',
+    pauseHintSec: 0,
   };
+  // ---- pause (stage 1b.3) ----
+  private paused = false;
+  /** Who paused the open pause ('' = the host page); remembered for the resume. */
+  private pausedBy = '';
+  private myName = '';
+  /** My own pause cooldown ends here (performance.now ms). Cosmetic: the server decides. */
+  private pauseBlockedUntil = 0;
+  /** Show the "Pause available in N s" hint until here. */
+  private pauseHintUntil = 0;
   private myStatus: HeroStatus | null = null;
   private myHero: HeroId = 'ember';
   private sendAcc = 0;
@@ -169,6 +183,7 @@ export class Game {
     this.controls = new Controls(this.canvas, this.debug);
     // The server also needs CROSSFIRE_DEBUG=1; otherwise it ignores this.
     this.controls.onDebugHero = (hero) => this.room.send(MSG.debugHero, { hero });
+    this.controls.onPause = () => this.requestPause();
 
     const enemyMax = TUNING.waves.enemyCap + TUNING.client.deathViewSlack;
     this.enemies = new ViewRegistry<EnemyEntry>(
@@ -292,7 +307,47 @@ export class Game {
     }
     this.seenBefore.clear();
     this.myStatus = null;
+    this.paused = false;
+    this.pausedBy = '';
+    this.pauseBlockedUntil = 0;
+    this.pauseHintUntil = 0;
     this.controls.releaseAll();
+  }
+
+  /** Esc: ask the server to pause, unless my own cooldown is still running (then show a hint). */
+  private requestPause(): void {
+    if (this.phase !== 'running' || this.paused || !this.myStatus) return;
+    const now = performance.now();
+    if (pauseCooldownLeft(now, this.pauseBlockedUntil) > 0) {
+      this.pauseHintUntil = now + TUNING.pause.hintSec * 1000;
+      return;
+    }
+    this.room.send(MSG.pause, {});
+  }
+
+  /** Pause and resume, before this patch's positions are pushed. */
+  private onPauseChange(s: RoomState, now: number): void {
+    const paused = s.phase === 'running' && s.paused;
+    if (paused) this.pausedBy = s.pausedBy;
+    if (paused === this.paused) return;
+    this.paused = paused;
+    if (paused) {
+      // Nothing is sent while paused; held keys and a latched cast are dropped.
+      this.controls.releaseAll();
+      return;
+    }
+    if (s.phase !== 'running') return;
+    // Resumed.
+    if (this.pausedBy !== '' && this.pausedBy === this.myName)
+      this.pauseBlockedUntil = now + TUNING.pause.cooldownSec * 1000;
+    this.pausedBy = '';
+    this.controls.cast.cancel();
+    // Nothing slides across the paused gap; my hero restarts prediction from the server.
+    const before = now - TICK * 1000;
+    for (const h of this.heroes.values()) h.buf.rebase(before);
+    this.enemies.forEachActive((v) => v.buf.rebase(before));
+    this.bolts.forEachActive((v) => v.buf.rebase(before));
+    this.myStatus = null;
   }
 
   dispose(): void {
@@ -325,6 +380,8 @@ export class Game {
   private onPatch(s: RoomState): void {
     const now = performance.now();
     const myId = this.room.sessionId;
+    this.myName = s.heroes.get(myId)?.name ?? s.players.get(myId)?.name ?? '';
+    this.onPauseChange(s, now);
 
     s.heroes.forEach((h, id) => {
       let e = this.heroes.get(id);
@@ -413,6 +470,7 @@ export class Game {
     const me = s.heroes.get(myId);
     dbg.me = me ? { x: me.x, z: me.z, status: me.status, hero: me.hero, eCd: me.eCd } : null;
     dbg.zones = s.zones.size;
+    dbg.paused = this.paused;
 
     const v = this.hudView;
     v.wave = s.wave;
@@ -514,15 +572,19 @@ export class Game {
     this.fps?.frame(t - this.lastFrame, this.hudView.horde, this.tierName);
     const report = this.perf.frame(
       t - this.lastFrame,
-      this.phase === 'running',
+      // A pause counts like the lobby: the report window restarts (stage 1b.3).
+      this.phase === 'running' && !this.paused,
       this.tierName,
       this.canvas.width,
       this.canvas.height,
       this.stage.renderer.getPixelRatio(),
     );
     if (report) this.room.send(MSG.perf, report);
-    const dt = Math.min(0.1, (t - this.lastFrame) / 1000);
+    const frameDt = Math.min(0.1, (t - this.lastFrame) / 1000);
     this.lastFrame = t;
+    // Paused: the camera and the page keep working, but every animation and effect is frozen.
+    const paused = this.paused;
+    const dt = paused ? 0 : frameDt;
     const now = performance.now();
     const renderTime = now - TUNING.client.interpDelayMs;
     const myId = this.room.sessionId;
@@ -535,7 +597,7 @@ export class Game {
     let sends = 0;
     while (this.sendAcc >= TICK && sends < 3) {
       this.sendAcc -= TICK;
-      if (this.myStatus) this.sendInput();
+      if (this.myStatus && !paused) this.sendInput();
       sends++;
     }
     if (this.sendAcc > TICK) this.sendAcc = 0;
@@ -544,7 +606,7 @@ export class Game {
     let meX = 0;
     let meZ = 0;
     for (const [id, h] of this.heroes) {
-      if (id === myId && h.status === 'standing') {
+      if (id === myId && h.status === 'standing' && !paused) {
         this.controls.keys.move(this.move);
         this.predictor.decay(dt);
         this.predictor.renderPos(this.drawPos, this.sinceSend, this.move.x, this.move.z);
@@ -585,6 +647,8 @@ export class Game {
     });
 
     this.zones.forEachActive((z) => {
+      // Paused: the time left stays at the last patch's value.
+      if (paused) z.at = now;
       const left = z.remaining - (now - z.at) / 1000;
       z.disc.place(z.x, z.z, z.el, zoneOpacity(left, TUNING.zones.durationSec));
     });
@@ -604,7 +668,7 @@ export class Game {
     }
 
     // Q preview: where the zone would land, dim while Q cools down.
-    const qHeld = standing && this.controls.cast.qHeld;
+    const qHeld = standing && !paused && this.controls.cast.qHeld;
     if (qHeld) {
       clampCast(meX, meZ, this.aim.x, this.aim.z, TUNING.zones.castRange, this.castPos);
       this.preview.show(
@@ -616,10 +680,14 @@ export class Game {
     } else this.preview.hide();
     debugView().qPreview = this.preview.visible;
 
-    if (this.myStatus) this.stage.follow(meX, meZ, dt);
+    if (this.myStatus) this.stage.follow(meX, meZ, frameDt);
     const v = this.hudView;
     v.outsideRing = Math.hypot(meX, meZ) > TUNING.ring.radius;
     v.qHeld = qHeld;
+    v.paused = paused;
+    v.pausedBy = this.pausedBy;
+    v.myName = this.myName;
+    v.pauseHintSec = now < this.pauseHintUntil ? pauseCooldownLeft(now, this.pauseBlockedUntil) : 0;
     this.hud.update(v);
     this.stage.render(dt);
   }

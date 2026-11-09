@@ -212,6 +212,13 @@ export const TUNING = {
     maxNameUnits: 64,
   },
 
+  pause: {
+    /** A player can pause again only this long after the resume of their own last pause (s). */
+    cooldownSec: 10,
+    /** How long the client shows "Pause available in N s" after an Esc during the cooldown (s). */
+    hintSec: 2,
+  },
+
   log: {
     /** A perf line (tick time, memory, bandwidth) is written to the match log this often. */
     perfIntervalSec: 10,

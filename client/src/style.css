@@ -397,6 +397,34 @@ select {
 .status .s {
   font-size: 14px;
 }
+/* Pause (stage 1b.3): above the downed/dead panel, which stays visible underneath. */
+.pause {
+  top: 22%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  text-align: center;
+  padding: 14px 22px;
+  max-width: min(460px, calc(100% - 32px));
+  display: grid;
+  gap: 6px;
+  border-color: rgba(242, 193, 78, 0.5);
+}
+.pause .t {
+  font: 600 44px/0.9 var(--display);
+  letter-spacing: 0.04em;
+  color: var(--gold);
+}
+.pause .s {
+  font-size: 14px;
+}
+.pause-hint {
+  top: 104px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 6px 14px;
+  font-size: 14px;
+  color: var(--muted);
+}
 .progress {
   height: 7px;
   background: rgba(255, 255, 255, 0.12);

@@ -3,6 +3,7 @@ import { TUNING } from '@crossfire/shared/tuning';
 import type { HeroStatus } from '@crossfire/shared/types';
 import { el, setText, show } from '../dom';
 import { cdFrac, heroText } from './abilities';
+import { pauseHint, pauseText } from './pause';
 
 export interface HudView {
   wave: number;
@@ -27,6 +28,12 @@ export interface HudView {
   eCd: number;
   /** Q held: the zone preview is up. */
   qHeld: boolean;
+  /** The run is paused, by whom ('' = the host page), and my name (stage 1b.3). */
+  paused: boolean;
+  pausedBy: string;
+  myName: string;
+  /** Seconds left on my pause cooldown, shown after an Esc during it; 0 hides the hint. */
+  pauseHintSec: number;
 }
 
 /** One ability slot: key, name and a cooldown shade that shrinks as it comes back. */
@@ -73,6 +80,14 @@ export class Hud {
     this.statusBar,
   );
   private readonly vig = el('div', { id: 'vig' });
+  private readonly pauseLine = el('div', { className: 's' });
+  private readonly pause = el(
+    'div',
+    { id: 'hud-pause', className: 'hud panel pause', attrs: { role: 'status' } },
+    el('div', { className: 't', text: 'Paused' }),
+    this.pauseLine,
+  );
+  private readonly pauseHintEl = el('div', { id: 'hud-pause-hint', className: 'hud panel pause-hint' });
   private readonly heroName = el('span');
   private readonly heroSub = el('small');
   private readonly passive = el('div', { id: 'hud-passive', className: 'passive' });
@@ -99,6 +114,7 @@ export class Hud {
       el('div', {}, el('kbd', { text: 'Q' }), ' hold to aim your zone, release to cast'),
       el('div', {}, el('kbd', { text: 'E' }), ' utility'),
       el('div', {}, el('kbd', { text: 'F' }), ' hold near a fallen teammate to revive'),
+      el('div', {}, el('kbd', { text: 'Esc' }), ' pause (the host resumes)'),
       el('div', { text: 'Stay inside the orange ring' }),
     );
     if (debug)
@@ -130,10 +146,14 @@ export class Hud {
       ),
       this.banner,
       this.status,
+      this.pause,
+      this.pauseHintEl,
       help,
     );
     this.banner.hidden = true;
     this.status.hidden = true;
+    this.pause.hidden = true;
+    this.pauseHintEl.hidden = true;
   }
 
   private showHero(id: HeroId): void {
@@ -195,6 +215,12 @@ export class Hud {
       );
       this.statusFill.style.transform = `scaleX(${v.revivedFrac})`;
     }
+
+    show(this.pause, v.paused);
+    if (v.paused) setText(this.pauseLine, pauseText(v.pausedBy, v.myName));
+    const hint = !v.paused && v.pauseHintSec > 0;
+    show(this.pauseHintEl, hint);
+    if (hint) setText(this.pauseHintEl, pauseHint(v.pauseHintSec));
 
     const vig =
       v.status === 'standing' && v.outsideRing ? 1 : v.status !== 'standing' ? 0.6 : frac < 0.3 ? 0.5 : 0;

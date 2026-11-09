@@ -25,6 +25,11 @@ export type LogEvent =
   | { ev: 'died'; name: string }
   | { ev: 'revived'; name: string }
   | { ev: 'left'; name: string; reason: LeaveReason }
+  /** Stage 1b.3: a player (by name) or the host page paused the run. */
+  | { ev: 'paused'; name: string }
+  | { ev: 'paused'; host: true }
+  /** The host resumed; how long this pause lasted. */
+  | { ev: 'resumed'; pausedSec: number }
   | {
       ev: 'perf';
       tickP95Ms: number;
@@ -47,7 +52,10 @@ export type LogEvent =
       ev: 'end';
       reason: EndReason;
       wave: number;
+      /** Run time, paused time excluded. */
       durationSec: number;
+      /** Total paused time, an open pause included (stage 1b.3). */
+      pausedSec: number;
       kills: number;
       tickP95Ms: number;
       tickMaxMs: number;
@@ -65,6 +73,11 @@ const CODE_RE = new RegExp(`^[${ROOM_CODE_LETTERS}]{4}$`);
 export function logFileName(start: Date, code: string): string {
   if (!CODE_RE.test(code)) throw new Error(`Invalid room code for a log file: ${JSON.stringify(code)}`);
   return `${start.toISOString().replace(/:/g, '-')}_${code}.jsonl`;
+}
+
+/** Rounds to 1 decimal (paused seconds). */
+export function round1(v: number): number {
+  return Math.round(v * 10) / 10;
 }
 
 /** Rounds to 2 decimals for compact perf lines. */

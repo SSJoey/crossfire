@@ -79,6 +79,10 @@ export interface RoomState {
   playerCount: number;
   wave: number;
   waveState: WaveState;
+  /** The run is paused (stage 1b.3). */
+  paused: boolean;
+  /** Who paused: a player's name, or '' for the host page. */
+  pausedBy: string;
   players: SyncMap<PlayerView>;
   heroes: SyncMap<HeroView>;
   enemies: SyncMap<EnemyView>;

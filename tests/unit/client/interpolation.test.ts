@@ -57,3 +57,25 @@ describe('snapshot interpolation', () => {
     expect(lerpAngle(0, 1, 0.25)).toBeCloseTo(0.25, 6);
   });
 });
+
+describe('snapshot rebase after a pause (1b.3)', () => {
+  it('keeps only the newest value, re-timed, so nothing slides across the paused gap', () => {
+    const b = new SnapshotBuffer(8);
+    b.push(1000, 0, 0, 0);
+    b.push(1050, 4, 2, 1);
+    // Paused for 10 s, then resumed: the old snapshot moves to just before the new one.
+    b.rebase(11_000);
+    expect(b.size).toBe(1);
+    b.push(11_050, 6, 2, 1);
+    b.sample(11_000, out);
+    expect(out.x).toBe(4);
+    b.sample(11_025, out);
+    expect(out.x).toBeCloseTo(5, 6);
+  });
+
+  it('does nothing on an empty buffer', () => {
+    const b = new SnapshotBuffer(8);
+    b.rebase(1000);
+    expect(b.size).toBe(0);
+  });
+});

@@ -10,6 +10,7 @@ import {
 import { elementIndex, HEROES, isHeroId } from '@crossfire/shared/heroes';
 import { strongestSlow } from '@crossfire/shared/rules/abilities';
 import { loadTuning } from '@crossfire/shared/rules/loadtest';
+import { canPause, canResume } from '@crossfire/shared/rules/pause';
 import {
   isLoopbackAddress,
   KickCooldown,
@@ -36,7 +37,7 @@ import {
 import { BotSupervisor } from '../bots/supervisor';
 import { BotTickets, nextBotName } from '../bots/tickets';
 import type { EndReason, LeaveReason } from '../log/format';
-import { round2 } from '../log/format';
+import { round1, round2 } from '../log/format';
 import { logDir, MatchLog } from '../log/MatchLog';
 import { kBps, memoryMB, socketBytesWritten, TickStats } from '../log/perf';
 import { FixedTicker } from '../sim/tick';
@@ -175,6 +176,17 @@ export class HoldRoom extends Room<{ state: HoldState }> {
   clientReportMaxAgeMs = TUNING.log.clientReportMaxAgeSec * 1000;
   private readonly reports = new Map<string, { report: PerfReport; atMs: number }>();
 
+  // ---- pause (stage 1b.3) ----
+  /** A player can pause again this long after the resume of their own last pause (tests shorten it). */
+  pauseCooldownMs = TUNING.pause.cooldownSec * 1000;
+  private pauseStartMs = 0;
+  /** Paused time of this run, the open pause not included. */
+  private pausedTotalMs = 0;
+  /** Session id of the player whose pause is open (null: the host paused, or that player left). */
+  private pauserId: string | null = null;
+  /** sessionId → when that player may pause again. */
+  private readonly pauseBlockedUntil = new Map<string, number>();
+
   // ---- host-added bots ----
   private bots: BotSupervisor | null = null;
   private botSeed = 0;
@@ -211,7 +223,8 @@ export class HoldRoom extends Room<{ state: HoldState }> {
     this.roomId = await this.generateRoomCode();
 
     this.onMessage(MSG.input, (client, payload: unknown) => {
-      if (this.state.phase !== 'running') return;
+      // Inputs while paused are ignored (valid, so not counted as rejected).
+      if (this.state.phase !== 'running' || this.state.paused) return;
       const input = sanitizeInput(payload);
       if (!input) return this.reject(client);
       this.accept(client);
@@ -240,7 +253,7 @@ export class HoldRoom extends Room<{ state: HoldState }> {
     this.onMessage(MSG.debugHero, (client, payload: unknown) => {
       const p = this.state.players.get(client.sessionId);
       const hero = sanitizePick(payload);
-      if (!HoldRoom.debugHeroSwitch || !p || !hero || this.state.phase !== 'running')
+      if (!HoldRoom.debugHeroSwitch || !p || !hero || this.state.phase !== 'running' || this.state.paused)
         return this.reject(client);
       if (!this.world.switchHero(client.sessionId, hero)) return this.reject(client);
       this.accept(client);
@@ -293,7 +306,8 @@ export class HoldRoom extends Room<{ state: HoldState }> {
 
     this.onMessage(MSG.perf, (client, payload: unknown) => {
       const id = client.sessionId;
-      if (this.state.phase !== 'running' || !this.state.players.has(id)) return this.reject(client);
+      if (this.state.phase !== 'running' || this.state.paused || !this.state.players.has(id))
+        return this.reject(client);
       const report = sanitizePerfReport(payload);
       if (!report) return this.reject(client);
       const t = now();
@@ -301,6 +315,14 @@ export class HoldRoom extends Room<{ state: HoldState }> {
       if (prev && t - prev.atMs < this.clientReportMinGapMs) return this.reject(client);
       this.accept(client);
       this.reports.set(id, { report, atMs: t });
+    });
+
+    this.onMessage(MSG.pause, (client) => {
+      if (!this.pause(client)) this.reject(client);
+    });
+
+    this.onMessage(MSG.resume, (client) => {
+      if (!this.resume(client)) this.reject(client);
     });
 
     this.onMessage('*', (client) => {
@@ -373,6 +395,9 @@ export class HoldRoom extends Room<{ state: HoldState }> {
     this.ackTimers.delete(id);
     this.bytesAtPerf.delete(id);
     this.reports.delete(id);
+    this.pauseBlockedUntil.delete(id);
+    // The run stays paused when its pauser leaves; only the host resumes.
+    if (this.pauserId === id) this.pauserId = null;
     if (this.hosts.delete(id)) {
       // No host page left: nobody can remove the bots any more, so they go now.
       if (this.hosts.size === 0) this.removeBots();
@@ -404,7 +429,7 @@ export class HoldRoom extends Room<{ state: HoldState }> {
 
   /** Times the state encoding and send, for the perf lines. */
   override broadcastPatch(): boolean {
-    if (this.state.phase !== 'running') return super.broadcastPatch();
+    if (this.state.phase !== 'running' || this.state.paused) return super.broadcastPatch();
     const t0 = now();
     const sent = super.broadcastPatch();
     const ms = now() - t0;
@@ -540,6 +565,59 @@ export class HoldRoom extends Room<{ state: HoldState }> {
     this.bots = null;
   }
 
+  // ---- pause (stage 1b.3) ----
+
+  /** A player in the run (Esc) or the host page pauses. Returns false if refused. */
+  private pause(client: Client): boolean {
+    const id = client.sessionId;
+    const host = this.isHost(client);
+    const t = now();
+    const ok = canPause({
+      phase: this.state.phase as Phase,
+      paused: this.state.paused,
+      role: host ? 'host' : 'player',
+      inRun: this.world.heroes.has(id),
+      nowMs: t,
+      blockedUntilMs: this.pauseBlockedUntil.get(id) ?? 0,
+    });
+    if (!ok) return false;
+    this.accept(client);
+    const name = host ? '' : (this.world.heroes.get(id)?.name ?? '');
+    this.state.paused = true;
+    this.state.pausedBy = name;
+    this.pauserId = host ? null : id;
+    this.pauseStartMs = t;
+    this.log?.write(t, host ? { ev: 'paused', host: true } : { ev: 'paused', name });
+    return true;
+  }
+
+  /** The host page resumes. Returns false if refused. */
+  private resume(client: Client): boolean {
+    const role = this.isHost(client) ? 'host' : 'player';
+    if (!canResume({ phase: this.state.phase as Phase, paused: this.state.paused, role })) return false;
+    this.accept(client);
+    const t = now();
+    const ms = t - this.pauseStartMs;
+    this.pausedTotalMs += ms;
+    this.world.addPausedTime(ms);
+    if (this.pauserId !== null) this.pauseBlockedUntil.set(this.pauserId, t + this.pauseCooldownMs);
+    this.clearPause();
+    this.log?.write(t, { ev: 'resumed', pausedSec: round1(ms / 1000) });
+    // The perf window restarts: no paused time in tick, patch or bandwidth numbers.
+    this.lastPerfMs = t;
+    this.windowTicks.reset();
+    this.windowPatches.reset();
+    for (const c of this.clients)
+      if (this.bytesAtPerf.has(c.sessionId)) this.bytesAtPerf.set(c.sessionId, socketBytesWritten(c.ref));
+    return true;
+  }
+
+  private clearPause(): void {
+    this.state.paused = false;
+    this.state.pausedBy = '';
+    this.pauserId = null;
+  }
+
   // ---- lobby flow ----
 
   private setPhase(phase: Phase): void {
@@ -588,6 +666,8 @@ export class HoldRoom extends Room<{ state: HoldState }> {
     this.boltStates.clear();
     this.zoneStates.clear();
     for (const p of this.state.players.values()) p.ready = false;
+    this.clearPause();
+    this.pauseBlockedUntil.clear();
     this.state.wave = 0;
     this.setPhase('lobby');
   }
@@ -595,7 +675,8 @@ export class HoldRoom extends Room<{ state: HoldState }> {
   // ---- simulation ----
 
   private tick(): void {
-    if (this.state.phase !== 'running') return;
+    // Paused: nothing steps, so every timer freezes (stage 1b.3).
+    if (this.state.phase !== 'running' || this.state.paused) return;
     const t0 = now();
     this.world.step(t0);
     let ended = false;
@@ -636,6 +717,7 @@ export class HoldRoom extends Room<{ state: HoldState }> {
     if (this.log) void this.endLog('aborted');
     this.runStartMs = t;
     this.lastPerfMs = t;
+    this.pausedTotalMs = 0;
     this.runTicks.reset();
     this.windowTicks.reset();
     this.runPatches.reset();
@@ -709,11 +791,13 @@ export class HoldRoom extends Room<{ state: HoldState }> {
     if (!log) return Promise.resolve();
     this.log = null;
     const t = now();
+    const pausedMs = this.pausedTotalMs + (this.state.paused ? t - this.pauseStartMs : 0);
     log.write(t, {
       ev: 'end',
       reason,
       wave: this.world.wave,
-      durationSec: Math.round((t - this.runStartMs) / 1000),
+      durationSec: Math.round((t - this.runStartMs - pausedMs) / 1000),
+      pausedSec: round1(pausedMs / 1000),
       kills: this.world.kills,
       tickP95Ms: round2(this.runTicks.percentile(0.95)),
       tickMaxMs: round2(this.runTicks.max),

@@ -93,6 +93,10 @@ export const HoldState = schema(
     playerCount: t.uint8().default(0),
     wave: t.uint16().default(0),
     waveState: t.string().default('spawning'),
+    /** The run is paused (stage 1b.3): the simulation does not step. */
+    paused: t.boolean().default(false),
+    /** Who paused: a player's name, or '' for the host page. */
+    pausedBy: t.string().default(''),
     players: t.map(PlayerState),
     heroes: t.map(HeroState),
     enemies: t.map(EnemyState),

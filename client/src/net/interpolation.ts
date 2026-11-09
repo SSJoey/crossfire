@@ -55,6 +55,20 @@ export class SnapshotBuffer {
     this.f[i] = facing;
   }
 
+  /**
+   * After a pause (stage 1b.3): keep only the newest snapshot, re-timed to `time`, so the
+   * next snapshot blends from it over one patch instead of across the whole paused gap.
+   */
+  rebase(time: number): void {
+    if (this.n === 0) return;
+    const last = this.idx(this.n - 1);
+    const x = this.x[last]!;
+    const z = this.z[last]!;
+    const f = this.f[last]!;
+    this.clear();
+    this.push(time, x, z, f);
+  }
+
   private idx(k: number): number {
     return (this.head + k) % this.cap;
   }

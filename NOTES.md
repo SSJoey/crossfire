@@ -657,8 +657,9 @@ No new packages. `@colyseus/sdk` 0.18.9 (still the latest) moved from the server
      - the simulation (enemies, bolts, zones);
      - cooldowns, the ring drain and regeneration;
      - bleed-out and revive timers, and the wave and break timers.
-     
+
      Inputs are ignored while paused. The match log records pause and resume, and the run time excludes the pause.
+
   3. **Esc in fullscreen** also leaves fullscreen (the browser's own rule). Accepted.
 - **Still to settle in the 1b.3 planning session:**
   - what players and the host page show while paused (banner text, who paused);
@@ -674,10 +675,12 @@ No new packages. `@colyseus/sdk` 0.18.9 (still the latest) moved from the server
 JCCJ asked for (a) better visibility of which hero each player picked and (b) choosing a bot's hero, or a random one. **Decision: keep them in the stages where the brief already has these areas, with JCCJ's details added to those stages' plans.** Nothing is built now.
 
 **Stage 1e (bots, alongside the planned "bot hero variety"):**
+
 1. **Bot hero choice on the host page:** "Add bot" gets a choice of Ember, Bastion, Tide, Gale or **Random** (random picks one hero when the bot is added). The host can also change a bot's hero in the lobby. The server checks it like every host command.
 2. **Bots use their kit:** besides the basic attack (melee bots walk up and swing), bots cast a **simple Q** (on crowds) and **use E** now and then. Behaviour details are planned in the 1e session.
 
 **Stage 1f (game-night readiness, alongside the planned name tags, team panel and end-screen stats):**
+
 3. **Host page:** each player's hero next to their name in the player list.
 4. **In game, over each hero:** the name tag (planned) also shows the hero.
 5. **In game, team panel** (planned): each player with their hero and HP.
@@ -701,3 +704,80 @@ JCCJ asked for (a) better visibility of which hero each player picked and (b) ch
 - JCCJ played all four heroes: "all 4 heroes look good so far". This covers the brief's review-and-play step for 1b.2.
 - **Tide's teal-green tint stays as it is** (JCCJ, 2026-11-10): the look-test multiply of 0xa9c6ff, unchanged.
 - Left before stage 1b is finished: slice 1b.3 (pause), in its own session.
+
+## 2026-11-10: Slice 1b.3 planning (answers from JCCJ)
+
+The open points from "Pause added as slice 1b.3", settled:
+
+1. **What players see:** a centred banner, "Paused by <name>. Waiting for the host to resume." (or "Paused by the host."). The game view stays visible and frozen, with animations stopped. The host page shows "Paused by …" and a Resume button.
+2. **Pause spam:** a player can pause again only **10 s after the resume of their own last pause** (`TUNING.pause.cooldownSec`). Other players are not affected. During the cooldown, Esc only shows a hint: "Pause available in N s".
+3. **When:** any time during a run, whatever the pauser's status (standing, downed or dead), in a wave or a break. A downed hero's bleed-out freezes too.
+4. **Bots** never pause. Their inputs during a pause are ignored like everyone's. No bot code changes.
+5. **Perf:** a pause counts like the lobby. The client reporter's 10 s window restarts and nothing is sent. The server writes no `perf` lines while paused; its 10 s window restarts on resume.
+6. **Log time:** each line's `t` stays wall-clock ms since the run started, so the gap is visible. New lines: `paused` (`name`, or `host: true`) and `resumed` (`pausedSec`). The `end` line's `durationSec` and the end screen's run time exclude paused time; `end` gains `pausedSec` (the total).
+7. **Leave or kick while paused:** nothing special. The run stays paused, even if the pauser left; only the host resumes. If every player leaves, the room goes back to the lobby as before, and the pause is cleared.
+8. **Host page:** one Pause/Resume button during a run (a small addition to decision 1, which had the host page only resume). The host's pause has no cooldown.
+
+## 2026-11-10: Slice 1b.3 build notes (pause)
+
+### Versions
+
+- No new packages. `t.boolean()` and `t.string()` were already in use with the installed `@colyseus/schema` 5.0.43.
+
+### How it works
+
+- **Messages:** `MSG.pause` (a player in the run, or the host page) and `MSG.resume` (host page only). The checks are pure rules in `shared/rules/pause.ts` (`canPause`, `canResume`, `pauseCooldownLeft`).
+- **Synced state:** `HoldState.paused` and `pausedBy` (a name, or `''` for the host page).
+- **Server freeze:** `HoldRoom.tick()` returns early while paused, so `World.step` isn't called. Every timer steps by the fixed `dt`, so all of them freeze: cooldowns, bleed-out, revive, waves and breaks, zones, ring drain and regen, enemy swings and bolts. `World.addPausedTime(ms)` takes the pause out of the run's duration (the end screen's `durationSec`).
+- **Ignored or refused while paused:** inputs are dropped (they're valid, so they aren't counted as rejected); `debugHero` and `perf` reports are rejected.
+- **On resume:** heroes' inputs are stale (over 250 ms), so everyone stands still until fresh inputs arrive one tick later.
+- **Cooldown:** on resume, the pauser (if still in the room) can't pause again for `TUNING.pause.cooldownSec`. The host page has no cooldown. "Back to lobby" clears the pause and every cooldown.
+- **Match log:**
+  - `paused` (`name` or `host: true`) and `resumed` (`pausedSec`);
+  - `end` gains `pausedSec`, an open pause included, and its `durationSec` excludes paused time;
+  - no `perf` lines while paused. On resume the perf window restarts: tick and patch stats, and each client's byte counter. `broadcastPatch` isn't timed while paused.
+- **Client:**
+  - Esc (`isPauseKey`: no key repeats) sends `pause`. During my own cooldown it shows "Pause available in N s" for `TUNING.pause.hintSec` (2 s) instead. The local cooldown is cosmetic; the server decides.
+  - While paused:
+    - no inputs are sent and nothing is predicted; my hero is drawn at the server position;
+    - every animation and effect gets `dt = 0`, and zones keep their last time left;
+    - the Q preview is hidden;
+    - the perf reporter counts the pause like the lobby;
+    - the camera still follows.
+  - On pause, held keys and a latched cast are released. On resume, a latched cast is cancelled, every snapshot buffer is `rebase`d (only the newest value, re-timed one tick back), and prediction restarts from the server position.
+- **HUD:** a "Paused" panel (`#hud-pause`, "Paused by you / <name> / the host. Waiting for the host to resume.") sits above the downed/dead panel, which stays visible. The help panel gains "Esc pause (the host resumes)".
+- **Host page:** a `#host-pause` button between Start and Back to lobby: Pause while running, Resume while paused (highlighted). The phase line reads "Paused by <name>." or "Paused by the host.".
+
+### Implementation choices (not in the brief; for review)
+
+1. A pause request that's refused (cooldown, lobby, already paused) is counted as rejected and gets no reply. Only the client's own hint explains the cooldown.
+2. `TUNING.pause.hintSec` (2 s), how long the cooldown hint shows, is a new client tunable.
+3. Keys pressed during a pause are kept on resume (WASD still held moves at once); Q/E presses during a pause are dropped.
+
+### Changed existing tests (mechanical)
+
+- `tests/unit/server/matchlog.test.ts`: the `end` line in the MatchLog test gains `pausedSec: 0` (it's now a required field).
+
+### Test-first record
+
+- **Written first and seen failing:**
+  - 8 tests failed: 7 in the new `integration/pause` and the World pause-time test.
+  - 2 test files couldn't load (`unit/shared/pause`, `unit/client/pause`), because their modules didn't exist yet.
+  - The 2 `rebase` tests in `unit/client/interpolation` were written before the method and seen failing.
+- The new log-line test passed at once at runtime (`logLine` writes any object); only the typecheck enforces the new event shapes.
+
+### Checks (2026-11-10)
+
+- **Tests:** 562 unit, integration and regression tests pass (537 before), and 10 Playwright tests pass (1 new: Esc, banner, host Resume, cooldown hint, host pause). Lint and typecheck are clean.
+- **Formatting:** Prettier flagged NOTES.md. The 1e/1f list (2026-11-10) was joined into one paragraph; a blank line before it keeps it a list.
+- **Server smoke run** (port 2599): lobby → running → ended after 18.0 s.
+- **Load test,** 2 minutes, 8 bots, 120 enemies: PASSED. Tick 1 ms + patch 0.9 ms = **1.9 ms**; **42.9 kB/s** per client (1b.2: 1.9 ms, 42.7 kB/s).
+- **Screenshots** (headless Chrome, scripted): the paused game (Tide), the host page while paused, and the cooldown hint.
+
+### For JCCJ's review
+
+- Play it by hand (`npm run dev`, two player tabs plus the host page):
+  - Esc while standing, downed and dead; the banner on the other tab;
+  - Resume from the host page; Esc again within 10 s (hint), then after it;
+  - the host's own pause.
+- Esc in browser fullscreen also leaves fullscreen (accepted in the 1b.3 decisions).

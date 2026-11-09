@@ -33,6 +33,9 @@ export class HostApp {
   private readonly phaseText = el('div', { id: 'host-phase', className: 'muted' });
   private readonly startBtn = el('button', { id: 'host-start', className: 'primary', text: 'Start run' });
   private readonly restartBtn = el('button', { id: 'host-restart', text: 'Back to lobby' });
+  /** Pause during a run, Resume while paused (stage 1b.3). */
+  private readonly pauseBtn = el('button', { id: 'host-pause', text: 'Pause' });
+  private paused = false;
   private readonly addBotBtn = el('button', { id: 'host-add-bot', text: 'Add bot' });
   private readonly removeBotsBtn = el('button', { id: 'host-remove-bots', text: 'Remove bots' });
   private readonly error = el('div', { id: 'host-error', className: 'err', attrs: { role: 'alert' } });
@@ -40,6 +43,7 @@ export class HostApp {
   constructor(root: HTMLElement) {
     this.startBtn.disabled = true;
     this.restartBtn.disabled = true;
+    this.pauseBtn.disabled = true;
     this.addBotBtn.disabled = true;
     this.removeBotsBtn.disabled = true;
     this.addrLabel.hidden = true;
@@ -47,6 +51,7 @@ export class HostApp {
     this.removeBotsBtn.addEventListener('click', () => this.room?.send(MSG.removeBots, {}));
     this.startBtn.addEventListener('click', () => this.room?.send(MSG.start, {}));
     this.restartBtn.addEventListener('click', () => this.room?.send(MSG.restart, {}));
+    this.pauseBtn.addEventListener('click', () => this.room?.send(this.paused ? MSG.resume : MSG.pause, {}));
     this.addrSelect.addEventListener('change', () => {
       this.address = this.addrSelect.value;
       void this.renderLink();
@@ -81,7 +86,7 @@ export class HostApp {
           el('div', { className: 'row' }, el('div', { className: 'k', text: 'Players' }), this.count),
           this.list,
           this.phaseText,
-          el('div', { className: 'row' }, this.startBtn, this.restartBtn),
+          el('div', { className: 'row' }, this.startBtn, this.pauseBtn, this.restartBtn),
           el('div', { className: 'row' }, this.addBotBtn, this.removeBotsBtn),
           el('div', { className: 'muted', text: 'To play yourself, open the link in another tab.' }),
           this.error,
@@ -150,6 +155,10 @@ export class HostApp {
     const phase: Phase = s.phase;
     this.startBtn.disabled = phase !== 'lobby' || !allReady;
     this.restartBtn.disabled = phase === 'lobby';
+    this.paused = phase === 'running' && s.paused;
+    this.pauseBtn.disabled = phase !== 'running';
+    setText(this.pauseBtn, this.paused ? 'Resume' : 'Pause');
+    this.pauseBtn.classList.toggle('primary', this.paused);
     this.addBotBtn.disabled = phase !== 'lobby' || s.players.size >= TUNING.lobby.maxPlayers;
     this.removeBotsBtn.disabled = phase !== 'lobby' || botCount === 0;
     setText(
@@ -158,9 +167,11 @@ export class HostApp {
         ? allReady
           ? 'Everyone is ready.'
           : 'Waiting for every player to press ready.'
-        : phase === 'running'
-          ? `Run in progress: wave ${s.wave}.`
-          : `Run over at wave ${s.wave}. Press "Back to lobby" for a new run.`,
+        : this.paused
+          ? `Paused by ${s.pausedBy === '' ? 'the host' : s.pausedBy}. Press "Resume" to play on.`
+          : phase === 'running'
+            ? `Run in progress: wave ${s.wave}.`
+            : `Run over at wave ${s.wave}. Press "Back to lobby" for a new run.`,
     );
   }
 }

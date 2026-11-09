@@ -156,6 +156,14 @@ export class World {
     this.events.length = 0;
   }
 
+  /**
+   * Time the run spent paused (stage 1b.3), left out of the run's duration. Every other timer
+   * steps by the fixed dt, so it freezes simply because step() is not called while paused.
+   */
+  addPausedTime(ms: number): void {
+    if (ms > 0) this.startMs += ms;
+  }
+
   stop(): void {
     this.phase = 'idle';
     this.enemies.clear();

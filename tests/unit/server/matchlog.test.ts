@@ -71,6 +71,24 @@ describe('log format', () => {
     });
   });
 
+  it('pause and resume lines (1b.3): a player name, or host: true; resumed carries pausedSec', () => {
+    expect(JSON.parse(logLine(5000, { ev: 'paused', name: 'Ann' }))).toEqual({
+      t: 5000,
+      ev: 'paused',
+      name: 'Ann',
+    });
+    expect(JSON.parse(logLine(6000, { ev: 'paused', host: true }))).toEqual({
+      t: 6000,
+      ev: 'paused',
+      host: true,
+    });
+    expect(JSON.parse(logLine(9000, { ev: 'resumed', pausedSec: 3.2 }))).toEqual({
+      t: 9000,
+      ev: 'resumed',
+      pausedSec: 3.2,
+    });
+  });
+
   it('file name: ISO start time without colons, then the room code', () => {
     const name = logFileName(new Date('2026-11-02T20:15:03.123Z'), 'ABCD');
     expect(name).toBe('2026-11-02T20-15-03.123Z_ABCD.jsonl');
@@ -128,6 +146,7 @@ describe('MatchLog', () => {
       tickP95Ms: 1.2,
       tickMaxMs: 2,
       patchP95Ms: 0.4,
+      pausedSec: 0,
     });
     await log.close();
 

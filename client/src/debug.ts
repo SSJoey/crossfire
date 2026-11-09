@@ -9,9 +9,11 @@ export interface DebugView {
   zones: number;
   /** The Q preview is showing. */
   qPreview: boolean;
+  /** The run is paused (stage 1b.3). */
+  paused: boolean;
 }
 
-const view: DebugView = { phase: 'none', me: null, zones: 0, qPreview: false };
+const view: DebugView = { phase: 'none', me: null, zones: 0, qPreview: false, paused: false };
 (window as unknown as { __crossfire: DebugView }).__crossfire = view;
 
 export function debugView(): DebugView {

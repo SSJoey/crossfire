@@ -73,6 +73,10 @@ export const MSG = {
   pick: 'pick',
   /** Player only, during a run, only on a server with CROSSFIRE_DEBUG=1: `{ hero: HeroId }`. */
   debugHero: 'debugHero',
+  /** A player in the run (Esc) or the host page, during a run: freeze everything (stage 1b.3). */
+  pause: 'pause',
+  /** Host only, while paused. */
+  resume: 'resume',
 } as const;
 
 /** Bits of `EnemyState.fx`: status effects the client shows. */
