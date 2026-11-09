@@ -398,3 +398,9 @@ No new packages. `@colyseus/sdk` 0.18.9 (still the latest) moved from the server
   - 4 new or changed reporter tests were written first and seen failing.
   - 392 tests pass, along with 5 Playwright tests, lint and typecheck.
   - Not checked by hand in a browser yet: switch tabs for about 20 s during a run, and the next `perf` line should still have the client's report. For the next playtest.
+
+## 2026-11-09: Client fps check deferred to 1e (JCCJ)
+
+- **Deviation from BRIEF.md** ("Performance budget": the check runs from 1a onward with the load test). The by-hand client fps check is no longer part of 1a. It covers Low/Medium at 120 enemies (targets 60 / 45 fps), High at 80 enemies (`--cap 80`), and the host on Low while serving 8 clients.
+- **When:** stage 1e. The real enemy mix (rusher, brute, ranged, boss) and the 10-wave tuning arrive there, and that horde is the main cost. Add it to the 1e plan.
+- **Unchanged:** the 1a server load test (8 bots, 120 enemies, 15 min) passed on 2026-11-02. Client fps reports keep flowing into the match logs, so playtests still record real fps meanwhile.
