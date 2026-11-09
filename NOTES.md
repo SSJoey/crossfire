@@ -410,4 +410,7 @@ No new packages. `@colyseus/sdk` 0.18.9 (still the latest) moved from the server
 - **First run, invalid:** JCCJ's own terminal server was still holding port 2567. With host networking, the container's server couldn't bind, so "server started in the container" failed.
   - The other HTTP checks passed only because the terminal server answered them. The log file permissions show it: `CNRQ` and `FBQD` are `-rw-rw-r--` (terminal server), not `-rw-r--r--` (container).
 - **Second run, with 2567 free:** all checks passed, the bot check included. The new log `2026-11-09T12-42-59.631Z_SYNY.jsonl` has the container's permissions.
-- **Still open:** the script could refuse to start when 2567 is already in use. Not done; up to JCCJ.
+- **Port guard (JCCJ: yes):** `docker-check.sh` now stops with "FAIL port 2567 is already in use", right after `docker compose down`, so its own container never trips it.
+  - `CHECK_PORT` overrides the port for the script's test only.
+  - `tests/unit/tools/docker.test.ts` runs the script with a fake `sudo` that records its calls. A busy port must stop the script before `docker compose up`; a free port must reach it.
+- **The `NJGF` run** (J + Bot 1, 174 s): J's client reports are missing until 150 s. JCCJ confirmed the tab was in the background then, so this is expected, not a reporter bug.

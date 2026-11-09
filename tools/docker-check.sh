@@ -9,6 +9,16 @@ fail() { echo "FAIL  $1"; fails=$((fails + 1)); }
 
 sudo -v || exit 1
 sudo docker compose down >/dev/null 2>&1
+
+# The container uses host networking: if anything else holds the port, the container's server
+# can't bind and the HTTP checks below would test that other server instead (2026-11-09).
+# CHECK_PORT is for the script's own test only; the container always uses 2567.
+port=${CHECK_PORT:-2567}
+if (: </dev/tcp/127.0.0.1/"$port") 2>/dev/null; then
+  fail "port $port is already in use (a dev server still running?). Stop it, then run this again."
+  exit 1
+fi
+
 before=$(ls logs/*.jsonl 2>/dev/null | wc -l)
 
 echo "Starting the container..."

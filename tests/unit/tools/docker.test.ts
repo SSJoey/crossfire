@@ -1,5 +1,8 @@
-import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { spawn } from 'node:child_process';
+import { chmodSync, existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { createServer, type AddressInfo } from 'node:net';
+import { tmpdir } from 'node:os';
+import { join, resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { parse } from 'yaml';
 
@@ -55,6 +58,70 @@ describe('docker compose', () => {
 
   it('runs with a read-only root filesystem', () => {
     expect(server.read_only).toBe(true);
+  });
+});
+
+/**
+ * Runs tools/docker-check.sh with a fake `sudo` that only allows `sudo -v` and
+ * `docker compose down` and logs every call; anything after that stops the script, so no real Docker command runs.
+ * The port is overridden with CHECK_PORT, so the user's own 2567 is never touched.
+ */
+function runCheckScript(port: number): Promise<{ code: number | null; out: string; sudo: string }> {
+  const bin = mkdtempSync(join(tmpdir(), 'crossfire-sudo-'));
+  const fake = join(bin, 'sudo');
+  const calls = join(bin, 'calls.log');
+  writeFileSync(
+    fake,
+    [
+      '#!/usr/bin/env bash',
+      'echo "$*" >> "$FAKE_SUDO_LOG"',
+      'case "$*" in',
+      '  "-v"|"docker compose down") exit 0 ;;',
+      '  *) kill -TERM $PPID; exit 1 ;;',
+      'esac',
+      '',
+    ].join('\n'),
+  );
+  chmodSync(fake, 0o755);
+  return new Promise((done) => {
+    const p = spawn('bash', [resolve(ROOT, 'tools/docker-check.sh')], {
+      env: {
+        ...process.env,
+        PATH: `${bin}:${process.env.PATH}`,
+        CHECK_PORT: String(port),
+        FAKE_SUDO_LOG: calls,
+      },
+    });
+    let out = '';
+    p.stdout.on('data', (d: Buffer) => (out += d.toString()));
+    p.stderr.on('data', (d: Buffer) => (out += d.toString()));
+    p.on('close', (code) => done({ code, out, sudo: existsSync(calls) ? readFileSync(calls, 'utf8') : '' }));
+  });
+}
+
+describe('docker-check.sh', () => {
+  it('refuses to run when something else already listens on the port (2026-11-09)', async () => {
+    const busy = createServer();
+    await new Promise<void>((ok) => busy.listen(0, '0.0.0.0', ok));
+    const port = (busy.address() as AddressInfo).port;
+    try {
+      const { code, out, sudo } = await runCheckScript(port);
+      expect(out).toContain(`FAIL  port ${port} is already in use`);
+      expect(sudo).not.toContain('compose up');
+      expect(code).not.toBe(0);
+    } finally {
+      busy.close();
+    }
+  });
+
+  it('goes on to start the container when the port is free', async () => {
+    const probe = createServer();
+    await new Promise<void>((ok) => probe.listen(0, '127.0.0.1', ok));
+    const port = (probe.address() as AddressInfo).port;
+    await new Promise((ok) => probe.close(ok));
+    const { out, sudo } = await runCheckScript(port);
+    expect(out).not.toContain('already in use');
+    expect(sudo).toContain('docker compose up');
   });
 });
 
