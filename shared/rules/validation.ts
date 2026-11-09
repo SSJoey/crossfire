@@ -189,16 +189,23 @@ export function sanitizeName(
 }
 
 /**
- * Latin look-alikes from Cyrillic and Greek (lower case, as `skeleton` lower-cases first).
- * Only for comparing names; nothing is ever displayed through it.
+ * Latin look-alikes, in lower case (the skeleton lower-cases first). A small hand-written table
+ * (JCCJ, 2026-11-09), not the full Unicode confusables list. Only for comparing names; nothing is
+ * ever displayed through it.
  */
 const CONFUSABLE: Readonly<Record<string, string>> = Object.freeze({
+  // ASCII. i, I, l, 1 and | all meet as l: capital I and l look the same in the game fonts, and names compare
+  // ignoring case, so i has to join them too (JCCJ, 2026-11-09).
+  '\u0069': 'l',
+  '\u0031': 'l',
+  '\u007c': 'l',
+  '\u0030': 'o',
   // Cyrillic
   '\u0430': 'a',
   '\u0432': 'b',
   '\u0435': 'e',
   '\u0455': 's',
-  '\u0456': 'i',
+  '\u0456': 'l',
   '\u0458': 'j',
   '\u043a': 'k',
   '\u043c': 'm',
@@ -222,7 +229,7 @@ const CONFUSABLE: Readonly<Record<string, string>> = Object.freeze({
   '\u03b5': 'e',
   '\u03b6': 'z',
   '\u03b7': 'h',
-  '\u03b9': 'i',
+  '\u03b9': 'l',
   '\u03ba': 'k',
   '\u03bc': 'm',
   '\u03bd': 'n',
@@ -232,15 +239,95 @@ const CONFUSABLE: Readonly<Record<string, string>> = Object.freeze({
   '\u03c5': 'y',
   '\u03c7': 'x',
   '\u03f2': 'c',
-  // Latin
-  '\u0131': 'i',
+  // Armenian
+  '\u0585': 'o',
+  '\u0578': 'n',
+  '\u057d': 'u',
+  '\u0570': 'h',
+  '\u0581': 'g',
+  '\u0566': 'q',
+  // Latin: dotless i, alpha, script g, small capitals
+  '\u0131': 'l',
+  '\u0251': 'a',
+  '\u0261': 'g',
+  '\u1d00': 'a',
+  '\u0299': 'b',
+  '\u1d04': 'c',
+  '\u1d05': 'd',
+  '\u1d07': 'e',
+  '\u0262': 'g',
+  '\u029c': 'h',
+  '\u026a': 'l',
+  '\u1d0a': 'j',
+  '\u1d0b': 'k',
+  '\u029f': 'l',
+  '\u1d0d': 'm',
+  '\u0274': 'n',
+  '\u1d0f': 'o',
+  '\u1d18': 'p',
+  '\u0280': 'r',
+  '\ua731': 's',
+  '\u1d1b': 't',
+  '\u1d1c': 'u',
+  '\u1d20': 'v',
+  '\u1d21': 'w',
+  '\u028f': 'y',
+  '\u1d22': 'z',
 });
+
+/**
+ * Cherokee capitals that look like Latin letters. `toLowerCase` turns them into Cherokee small
+ * letters, so both forms are added to the lookup below.
+ */
+const CHEROKEE: readonly (readonly [number, string])[] = [
+  [0x13a0, 'd'],
+  [0x13a1, 'r'],
+  [0x13a2, 't'],
+  [0x13a9, 'y'],
+  [0x13aa, 'a'],
+  [0x13ab, 'j'],
+  [0x13ac, 'e'],
+  [0x13b3, 'w'],
+  [0x13b7, 'm'],
+  [0x13bb, 'h'],
+  [0x13c0, 'g'],
+  [0x13c2, 'h'],
+  [0x13c3, 'z'],
+  [0x13c6, 'l'],
+  [0x13cf, 'b'],
+  [0x13d2, 'r'],
+  [0x13d4, 'w'],
+  [0x13d5, 's'],
+  [0x13da, 's'],
+  [0x13dd, 'l'],
+  [0x13de, 'l'],
+  [0x13df, 'c'],
+  [0x13e2, 'p'],
+  [0x13e6, 'k'],
+  [0x13e7, 'd'],
+  [0x13f4, 'b'],
+];
+const FOLD = new Map<string, string>(Object.entries(CONFUSABLE));
+for (const [cp, latin] of CHEROKEE) {
+  const c = String.fromCodePoint(cp);
+  FOLD.set(c, latin);
+  FOLD.set(c.toLowerCase(), latin);
+}
+/** Letter pairs that read as one letter: rn as m, vv as w. */
+const PAIRS: readonly (readonly [string, string])[] = [
+  ['rn', 'm'],
+  ['vv', 'w'],
+];
 const IGNORABLE = /\p{Default_Ignorable_Code_Point}/gu;
 
-/** What a name looks like, for duplicate checks: NFKC, lower case, no invisibles, look-alikes folded. */
+/**
+ * What a name looks like, for duplicate checks: NFKC, no invisibles, lower case, look-alikes folded,
+ * then rn/vv. Trade-off: some real names meet (Ian and lan, Arnie and Amie); the second gets " 2".
+ */
 export function nameSkeleton(name: string): string {
   let out = '';
-  for (const c of name.normalize('NFKC').toLowerCase().replace(IGNORABLE, '')) out += CONFUSABLE[c] ?? c;
+  for (const c of name.normalize('NFKC').replace(IGNORABLE, '').toLowerCase()) out += FOLD.get(c) ?? c;
+  for (const [pair, one] of PAIRS) out = out.replaceAll(pair, one);
   return out;
 }
 

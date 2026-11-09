@@ -1,10 +1,11 @@
 import { randomUUID } from 'node:crypto';
+import { nameSkeleton } from '@crossfire/shared/rules/validation';
 
-/** The lowest free "Bot N" name (names compare case-insensitively, like uniqueName). */
+/** The lowest free "Bot N" name (names compare by look-alike skeleton, like uniqueName). */
 export function nextBotName(taken: Iterable<string>): string {
-  const lower = new Set<string>();
-  for (const t of taken) lower.add(t.toLowerCase());
-  for (let n = 1; ; n++) if (!lower.has(`bot ${n}`)) return `Bot ${n}`;
+  const seen = new Set<string>();
+  for (const t of taken) seen.add(nameSkeleton(t));
+  for (let n = 1; ; n++) if (!seen.has(nameSkeleton(`Bot ${n}`))) return `Bot ${n}`;
 }
 
 /**

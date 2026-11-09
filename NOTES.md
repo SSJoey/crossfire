@@ -297,7 +297,7 @@ No new packages. `@colyseus/sdk` 0.18.9 (still the latest) moved from the server
 
 ### Open (found while re-testing, not an audit finding)
 
-- A player named `__proto__` is missing from the `kBps` and `clients` maps of `perf` lines, because those are plain objects keyed by name. Not a security issue (nothing else is affected), but the log loses that player's numbers. Possible fix: build the maps with `Object.create(null)`. Not done; for JCCJ.
+- A player named `__proto__` is missing from the `kBps` and `clients` maps of `perf` lines, because those are plain objects keyed by name. Not a security issue (nothing else is affected), but the log loses that player's numbers. Fixed 2026-11-09 with `Object.create(null)` maps (see below).
 
 ## 2026-11-08: Audit 1 fixes, round 2 (R1, R2, R3, O1)
 
@@ -355,3 +355,34 @@ No new packages. `@colyseus/sdk` 0.18.9 (still the latest) moved from the server
 - **New: N1 (low).** The look-alike check misses plain-letter tricks (`AIice` vs `Alice`, `A1ice`) and some other scripts.
 - **JCCJ's decision:** commit round 2 now, then fix N1 in the next session, with a regression test written first. The default is the small ASCII pre-fold (I/1/| → l, 0 → o, rn → m) plus a few more scripts. Audit 1 stays open until N1 is fixed.
 - The reviewer's observations P1–P9 are in the report. Still to decide: whether the 6–9 s "already in the game" message after a silent Wi-Fi drop (P5), and the stack trace logged for each malformed frame, go into the N1 session.
+
+## 2026-11-09: Audit 1, N1 fix (+ P5 retry, P1 `__proto__`)
+
+**JCCJ's decisions:**
+
+- **N1:** a small hand-written fold, not a table generated from `confusables.txt`.
+- **i, I, l, 1 and | all count as one letter.** Folding capital I to l alone would break the case-insensitive rule (`Ian` vs `ian`), because look-alike matching has to be all-or-nothing.
+  - Accepted trade-off: names that differ only there meet (`Ian`/`lan`, `Eli`/`Ell`), as do `0`/`o`, `rn`/`m` and `vv`/`w` (`Arnie`/`Amie`).
+  - The second player to join gets " 2"; nobody is refused.
+- **P5:** "This laptop is already in the game" now auto-retries every `joinRetryMs` (5 s). After a silent Wi-Fi drop the old socket lingers 6–9 s, so the player is back by the second try. Proper reconnect is still 1f.
+- **P6:** the stack trace per malformed frame stays as it is (bounded; quieting it would mean another Colyseus internal).
+- **P1:** fixed in the same session.
+
+**Changes:**
+
+- `nameSkeleton` (`shared/rules/validation.ts`): NFKC, strip invisibles, lower case, then the `CONFUSABLE` map, then the pairs `rn` → m and `vv` → w. The map now covers:
+  - ASCII i/1/| → l and 0 → o;
+  - Cyrillic, Greek, Armenian, Latin small capitals, alpha and script g;
+  - 26 Cherokee capitals, plus their lower-case forms.
+- `nextBotName` uses the same skeleton, so a human named `Bot l` makes the next bot `Bot 2`, not `Bot 1 2`.
+- `writePerf` builds `kBps` and `clients` as null-prototype maps.
+
+**Checks:**
+
+- 17 new test cases were written first and seen failing (15 failed).
+- 389 tests pass, along with 5 Playwright tests, lint and typecheck.
+- The re-audit's `t7-names.ts` and `t8-names-live.mjs` both pass. The live probe ran against a production server on port 2673 from 192.168.1.11 and 172.16.0.2: `AIice` joined as `AIice 2`.
+
+**Still open (parked):**
+
+- For audit 3: P2 (emoji tag characters as hidden text), P3 (a kicked address can still make HTTP reservations), P4 (per-address limits vs IP aliases), P7 (pin exact Colyseus versions?), P8 (no per-address connection cap).

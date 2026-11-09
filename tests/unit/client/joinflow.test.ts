@@ -66,6 +66,16 @@ describe('join errors', () => {
     }
   });
 
+  it('"this laptop is already in the game" retries (the old socket may still be closing)', () => {
+    const f = classifyJoinError(serverError(409, JOIN_ERRORS.oneSeat));
+    expect(f).toEqual({ kind: 'oneSeat', message: JOIN_ERRORS.oneSeat, retryMs: TUNING.client.joinRetryMs });
+  });
+
+  it('a kicked laptop waits for the player, no retry', () => {
+    const f = classifyJoinError(serverError(403, JOIN_ERRORS.kickedWait));
+    expect(f).toEqual({ kind: 'kicked', message: JOIN_ERRORS.kickedWait, retryMs: null });
+  });
+
   it('other server errors are shown without retrying', () => {
     const f = classifyJoinError(serverError(500, 'boom'));
     expect(f.kind).toBe('unknown');

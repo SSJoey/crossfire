@@ -27,6 +27,20 @@ describe('R3: look-alikes get the duplicate suffix', () => {
     ['decomposed accent', 'Jose' + ACUTE, 'Jos' + u(0xe9)],
     ['fullwidth letters', u(0xff21) + 'lice', 'Alice'],
     ['case', 'ALICE', 'Alice'],
+    // Re-audit 2, N1: plain-letter and other-script look-alikes.
+    ['capital I for l', 'AIice', 'Alice'],
+    ['digit 1 for l', 'A1ice', 'Alice'],
+    ['bar for l', 'A|ice', 'Alice'],
+    ['l for i', 'Allce', 'Alice'],
+    ['Latin small capitals', u(0x1d00, 0x029f, 0x026a, 0x1d04, 0x1d07), 'Alice'],
+    ['Latin alpha', u(0x0251) + 'lice', 'Alice'],
+    ['Cherokee capitals', u(0x13aa, 0x13de, 0x13c6, 0x13df, 0x13ac), 'Alice'],
+    ['Armenian oh', 'B' + u(0x0585) + 'b', 'Bob'],
+    ['digit 0 for o', 'B0b', 'Bob'],
+    ['rn for m', 'rnike', 'mike'],
+    ['vv for w', 'Ovven', 'Owen'],
+    ['Ian and lan (accepted trade-off)', 'lan', 'Ian'],
+    ['Ian and ian (case still ignored)', 'ian', 'Ian'],
   ];
   for (const [label, joiner, existing] of cases) {
     it(label, () => {
@@ -36,6 +50,7 @@ describe('R3: look-alikes get the duplicate suffix', () => {
   }
 
   it('the name shown keeps what the player typed', () => {
+    expect(uniqueName(clean('AIice'), ['Bob'])).toBe('AIice');
     expect(uniqueName(clean('Alic' + CYR_E), ['Bob'])).toBe('Alic' + CYR_E);
   });
 });
@@ -89,5 +104,13 @@ describe('R3: real names still work unchanged', () => {
 
   it('two different real names never collide', () => {
     expect(uniqueName(clean('Bob'), [clean('Alice'), clean(u(0x0418, 0x0432, 0x0430, 0x043d))])).toBe('Bob');
+    for (const [a, b] of [
+      ['Ian', 'Ivan'],
+      ['Alice', 'Alina'],
+      ['Bob', 'Bobby'],
+      ['Joey', 'Zoey'],
+      ['Player 1', 'Player 7'],
+    ])
+      expect(uniqueName(a!, [b!])).toBe(a);
   });
 });

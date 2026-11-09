@@ -626,7 +626,8 @@ export class HoldRoom extends Room<{ state: HoldState }> {
     const log = this.log;
     if (!log) return;
     const elapsed = t - this.lastPerfMs;
-    const perClient: Record<string, number> = {};
+    // Null-prototype maps keyed by player name: a player called __proto__ gets a real key.
+    const perClient: Record<string, number> = Object.create(null) as Record<string, number>;
     let sum = 0;
     let max = 0;
     let n = 0;
@@ -641,7 +642,7 @@ export class HoldRoom extends Room<{ state: HoldState }> {
       if (rate > max) max = rate;
       n++;
     }
-    const clients: Record<string, PerfReport> = {};
+    const clients: Record<string, PerfReport> = Object.create(null) as Record<string, PerfReport>;
     for (const [id, r] of this.reports) {
       const p = this.state.players.get(id);
       if (p && t - r.atMs <= this.clientReportMaxAgeMs) clients[p.name] = r.report;

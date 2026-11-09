@@ -424,3 +424,12 @@ regression test before the next stage starts"), audit 1 closes when N1 is either
 - recorded in NOTES.md by JCCJ as an accepted limit of the look-alike check.
 
 P1 (the `__proto__` perf key) is cheap and worth fixing at the same time.
+
+## Fixed (2026-11-09)
+
+| Item      | Fix                                                                                                                                                                                | Regression test                                                                    |
+| --------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------- |
+| N1        | `nameSkeleton` folds i/I/l/1/\| to l and 0 to o, plus Armenian, Latin small capitals, alpha, script g, Cherokee capitals, `rn` → m and `vv` → w. Live: `AIice` joins as `AIice 2`. | `tests/regression/name-lookalikes.test.ts` (13 new rows, plus never-collide cases) |
+| P1        | The perf line's `kBps` and `clients` are null-prototype maps.                                                                                                                      | `tests/integration/matchlog.test.ts` ("a player named **proto**…")                 |
+| P5        | `oneSeat` auto-retries every `joinRetryMs`.                                                                                                                                        | `tests/unit/client/joinflow.test.ts`                                               |
+| Bot names | `nextBotName` uses the same skeleton.                                                                                                                                              | `tests/unit/server/bots.test.ts`                                                   |

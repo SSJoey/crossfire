@@ -42,7 +42,8 @@ export function classifyJoinError(err: unknown): JoinFailure {
   if (message === JOIN_ERRORS.inProgress) return { kind: 'inProgress', message, retryMs: retry };
   if (message === JOIN_ERRORS.emptyName) return { kind: 'emptyName', message, retryMs: null };
   if (message === JOIN_ERRORS.notHost) return { kind: 'notHost', message, retryMs: null };
-  if (message === JOIN_ERRORS.oneSeat) return { kind: 'oneSeat', message, retryMs: null };
+  // After a silent Wi-Fi drop the old socket lingers 6-9 s, so retry (reconnect proper is 1f).
+  if (message === JOIN_ERRORS.oneSeat) return { kind: 'oneSeat', message, retryMs: retry };
   if (message === JOIN_ERRORS.kickedWait) return { kind: 'kicked', message, retryMs: null };
   if (code === undefined || code === 0 || NO_ROOM_CODES.has(code)) {
     return { kind: 'unreachable', message: UNREACHABLE_MESSAGE, retryMs: retry };

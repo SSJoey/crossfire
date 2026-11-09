@@ -11,6 +11,11 @@ describe('nextBotName', () => {
   it('skips a name a human already uses (case-insensitive)', () => {
     expect(nextBotName(['bot 1', 'Ann'])).toBe('Bot 2');
   });
+
+  it('skips a name that only looks like it (same check as uniqueName)', () => {
+    expect(nextBotName(['Bot l'])).toBe('Bot 2');
+    expect(nextBotName(['B0t 1', 'BOT I'])).toBe('Bot 2');
+  });
 });
 
 describe('BotTickets', () => {

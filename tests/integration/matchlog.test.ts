@@ -173,6 +173,19 @@ describe('match log', () => {
     expect(later.clients).toEqual({});
   });
 
+  it('a player named __proto__ still has its own kB/s and report keys (re-audit 2, P1)', async () => {
+    const { code, room, players } = await startRun(colyseus, ['__proto__', 'Bo']);
+    const [proto] = players as [ClientRoom, ClientRoom];
+    room.perfIntervalMs = 300;
+    const report = { tier: 'low', fps: 60, low1: 50, w: 800, h: 600, dpr: 1 };
+    proto.send(MSG.perf, report);
+    await until(() => room.netStats(proto.sessionId)!.accepted >= 1, 3000, 'report accepted');
+    const perf = await perfLineAfter(code, lines(code).length);
+    expect(Object.hasOwn(perf.kBps as object, '__proto__')).toBe(true);
+    expect(Object.keys(perf.kBps as object).sort()).toEqual(['Bo', '__proto__']);
+    expect(Object.hasOwn(perf.clients as object, '__proto__')).toBe(true);
+  });
+
   it('perf reports sent in the lobby are ignored', async () => {
     const { code, room } = await openLobby(colyseus);
     const ann = await joinPlayer(colyseus, code, 'Ann');
