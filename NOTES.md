@@ -699,5 +699,5 @@ JCCJ asked for (a) better visibility of which hero each player picked and (b) ch
 ## 2026-11-10: 1b hands-on review (JCCJ)
 
 - JCCJ played all four heroes: "all 4 heroes look good so far". This covers the brief's review-and-play step for 1b.2.
-- Still open: Tide's teal-green tint (keep as is, a stronger blue, or tint only the cloth). Not settled by this review.
+- **Tide's teal-green tint stays as it is** (JCCJ, 2026-11-10): the look-test multiply of 0xa9c6ff, unchanged.
 - Left before stage 1b is finished: slice 1b.3 (pause), in its own session.
