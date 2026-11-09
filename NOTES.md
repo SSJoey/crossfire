@@ -668,3 +668,19 @@ No new packages. `@colyseus/sdk` 0.18.9 (still the latest) moved from the server
   - the perf reporter (count a pause like a hidden tab?) and the `perf` lines during a pause;
   - whether a player leaving or being kicked while paused changes anything.
 - **The "no hero cards" report is settled** (a stale browser tab, see above): nothing blocks 1b.3.
+
+## 2026-11-10: Hero visibility and bot heroes, booked for 1e and 1f (JCCJ)
+
+JCCJ asked for (a) better visibility of which hero each player picked and (b) choosing a bot's hero, or a random one. **Decision: keep them in the stages where the brief already has these areas, with JCCJ's details added to those stages' plans.** Nothing is built now.
+
+**Stage 1e (bots, alongside the planned "bot hero variety"):**
+1. **Bot hero choice on the host page:** "Add bot" gets a choice of Ember, Bastion, Tide, Gale or **Random** (random picks one hero when the bot is added). The host can also change a bot's hero in the lobby. The server checks it like every host command.
+2. **Bots use their kit:** besides the basic attack (melee bots walk up and swing), bots cast a **simple Q** (on crowds) and **use E** now and then. Behaviour details are planned in the 1e session.
+
+**Stage 1f (game-night readiness, alongside the planned name tags, team panel and end-screen stats):**
+3. **Host page:** each player's hero next to their name in the player list.
+4. **In game, over each hero:** the name tag (planned) also shows the hero.
+5. **In game, team panel** (planned): each player with their hero and HP.
+6. **End screen:** who played which hero, next to the planned stats (waves, combos, revives).
+
+- **For the brief's "remove something of equal size" rule:** items 1, 2, 4, 5 and 6 extend things already planned in Phase 1. Item 3 is a small addition, accepted without a trade, as with pause (2026-11-10). Add these to the 1e and 1f plans when those sessions start.
