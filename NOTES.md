@@ -684,3 +684,14 @@ JCCJ asked for (a) better visibility of which hero each player picked and (b) ch
 6. **End screen:** who played which hero, next to the planned stats (waves, combos, revives).
 
 - **For the brief's "remove something of equal size" rule:** items 1, 2, 4, 5 and 6 extend things already planned in Phase 1. Item 3 is a small addition, accepted without a trade, as with pause (2026-11-10). Add these to the 1e and 1f plans when those sessions start.
+
+## 2026-11-10: Enemy speed variation, booked for 1e (JCCJ)
+
+- **Enemies move at varying speeds, ±10%.** Built in **stage 1e** with the other enemy work (rusher, brute, ranged, boss), so every type gets it at once.
+- **Rule:**
+  - Each enemy rolls a speed factor evenly between **0.90 and 1.10** when it spawns, from the run's seeded random numbers, and keeps it for life.
+  - The factor multiplies the speed after the level step and its ×1.4 cap.
+  - The walk animation follows the actual speed (the client already scales the walk clip by speed).
+  - Range numbers go in `shared/tuning.ts` (`speedVarMin`/`speedVarMax` or similar, named in the 1e plan).
+- Extends planned 1e tuning; no trade needed.
+- **For the 1e tests:** factors stay within [0.9, 1.1] and are fixed per enemy; the same seed gives the same factors; the spread over many spawns covers the range.
