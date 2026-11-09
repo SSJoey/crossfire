@@ -245,7 +245,7 @@ No new packages. `@colyseus/sdk` 0.18.9 (still the latest) moved from the server
 - 305 unit + integration tests pass, 5 Playwright tests pass, lint and typecheck clean.
 - After the tests no bot process was left running.
 - A production server (`npm run server`) added a bot from a scripted host page (`tools/host-bot-check.ts`).
-- `bash tools/docker-check.sh` needs sudo: **to run by JCCJ**.
+- `bash tools/docker-check.sh` needs sudo: **to run by JCCJ**. Done 2026-11-09: all checks passed (see below).
 
 ## 2026-11-07: Security audit 1 (JCCJ)
 
@@ -404,3 +404,10 @@ No new packages. `@colyseus/sdk` 0.18.9 (still the latest) moved from the server
 - **Deviation from BRIEF.md** ("Performance budget": the check runs from 1a onward with the load test). The by-hand client fps check is no longer part of 1a. It covers Low/Medium at 120 enemies (targets 60 / 45 fps), High at 80 enemies (`--cap 80`), and the host on Low while serving 8 clients.
 - **When:** stage 1e. The real enemy mix (rusher, brute, ranged, boss) and the 10-wave tuning arrive there, and that horde is the main cost. Add it to the 1e plan.
 - **Unchanged:** the 1a server load test (8 bots, 120 enemies, 15 min) passed on 2026-11-02. Client fps reports keep flowing into the match logs, so playtests still record real fps meanwhile.
+
+## 2026-11-09: Docker check passed (JCCJ)
+
+- **First run, invalid:** JCCJ's own terminal server was still holding port 2567. With host networking, the container's server couldn't bind, so "server started in the container" failed.
+  - The other HTTP checks passed only because the terminal server answered them. The log file permissions show it: `CNRQ` and `FBQD` are `-rw-rw-r--` (terminal server), not `-rw-r--r--` (container).
+- **Second run, with 2567 free:** all checks passed, the bot check included. The new log `2026-11-09T12-42-59.631Z_SYNY.jsonl` has the container's permissions.
+- **Still open:** the script could refuse to start when 2567 is already in use. Not done; up to JCCJ.
