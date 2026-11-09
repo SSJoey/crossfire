@@ -17,18 +17,25 @@ const FRAME_CAPACITY = 2400;
 /**
  * Builds this client's performance report for the match log: every `intervalMs` of a run,
  * the average fps and the 1% low over that interval's frames, the tier and the canvas size.
- * Frames longer than `maxFrameMs` (hidden tab, frozen machine) are skipped. No allocation per
- * frame; one small object per report.
+ * Slow frames count, so a browser below 1 fps shows up as slow. Skipped: the one gap frame after
+ * the tab was hidden (`hidden()`), and any frame longer than `maxFrameMs` (a sleeping or frozen
+ * machine that sent no visibility event). No allocation per frame; one small object per report.
  */
 export class PerfReporter {
   private readonly stats = new FpsStats(FRAME_CAPACITY);
   private elapsedMs = 0;
   private frames = 0;
+  private skipNext = false;
 
   constructor(
     private readonly intervalMs = TUNING.log.clientReportSec * 1000,
     private readonly lim = TUNING.log,
   ) {}
+
+  /** The tab was hidden: the next frame spans the hidden time and is not counted. */
+  hidden(): void {
+    this.skipNext = true;
+  }
 
   /** Call once per rendered frame. Returns a report when one is due, otherwise null. */
   frame(
@@ -42,6 +49,11 @@ export class PerfReporter {
     if (!running) {
       this.elapsedMs = 0;
       this.frames = 0;
+      this.skipNext = false;
+      return null;
+    }
+    if (this.skipNext) {
+      this.skipNext = false;
       return null;
     }
     if (!(frameMs > 0) || frameMs > this.lim.maxFrameMs) return null;

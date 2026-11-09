@@ -104,6 +104,10 @@ export class Game {
   private raf = 0;
   private running = false;
   private readonly onResize = () => this.stage.resize();
+  /** A hidden tab draws no frames: tell the perf reporter to skip the gap frame that follows. */
+  private readonly onVisibility = () => {
+    if (document.hidden) this.perf.hidden();
+  };
 
   constructor(
     private readonly models: Models,
@@ -188,6 +192,7 @@ export class Game {
     if (this.running) return;
     this.running = true;
     window.addEventListener('resize', this.onResize);
+    document.addEventListener('visibilitychange', this.onVisibility);
     this.stage.resize();
     this.lastFrame = performance.now();
     const loop = (t: number) => {
@@ -203,6 +208,7 @@ export class Game {
     this.running = false;
     cancelAnimationFrame(this.raf);
     window.removeEventListener('resize', this.onResize);
+    document.removeEventListener('visibilitychange', this.onVisibility);
     this.controls.releaseAll();
   }
 

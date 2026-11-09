@@ -146,8 +146,11 @@ export const TUNING = {
     maxCanvasPx: 16384,
     minDpr: 0.25,
     maxDpr: 8,
-    /** A frame longer than this is a hidden tab or a frozen machine, not a frame (ms). */
-    maxFrameMs: 1000,
+    /**
+     * A frame longer than this is a sleeping or frozen machine, not a frame (ms). Hidden tabs are
+     * caught by the visibility event instead (JCCJ, 2026-11-09).
+     */
+    maxFrameMs: 10_000,
   },
 
   /** The test-only load room (CROSSFIRE_LOAD_ROOM=1). Never used in a real game. */

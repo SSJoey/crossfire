@@ -55,17 +55,45 @@ describe('PerfReporter', () => {
     expect(feed(r, 400, 1000 / 60)).toEqual([]);
   });
 
-  it('a long stall (hidden tab) does not count as a frame', () => {
+  it('a gap longer than the cap (sleep or frozen machine) does not count as a frame', () => {
     const r = new PerfReporter(10_000);
-    // A hidden tab draws no frames; the first frame back is a 30 s gap.
+    // No visibility event fired (a closed lid may not send one); the first frame back is a 30 s gap.
     expect(feed(r, 1, 30_000)).toEqual([]);
     expect(feed(r, 599, 1000 / 60)).toEqual([]);
     expect(feed(r, 1, 1000 / 60)).toHaveLength(1);
+  });
+
+  it('frames slower than 1 s count: a browser below 1 fps shows up as slow', () => {
+    const r = new PerfReporter(10_000);
+    const reports = feed(r, 4, 2500);
+    expect(reports).toHaveLength(1);
+    expect(reports[0]!.fps).toBe(0.4);
+    expect(reports[0]!.low1).toBe(0.4);
+  });
+
+  it('the gap frame after a hidden tab is skipped', () => {
+    const r = new PerfReporter(10_000);
+    r.hidden();
+    expect(feed(r, 1, 30_000)).toEqual([]);
+    expect(feed(r, 599, 1000 / 60)).toEqual([]);
+    const [rep] = feed(r, 1, 1000 / 60);
+    expect(rep!.fps).toBe(60);
+  });
+
+  it('only the one gap frame is skipped', () => {
+    const r = new PerfReporter(10_000);
+    r.hidden();
+    expect(feed(r, 1, 5000)).toEqual([]);
+    const reports = feed(r, 5, 2000);
+    expect(reports).toHaveLength(1);
+    expect(reports[0]!.fps).toBe(0.5);
   });
 
   it('its reports pass the server validation', () => {
     const r = new PerfReporter(10_000);
     const [rep] = feed(r, 1000, 10);
     expect(sanitizePerfReport(rep)).toEqual(rep);
+    const [slow] = feed(new PerfReporter(10_000), 4, 2500);
+    expect(sanitizePerfReport(slow)).toEqual(slow);
   });
 });

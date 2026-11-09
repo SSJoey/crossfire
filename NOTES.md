@@ -237,7 +237,7 @@ No new packages. `@colyseus/sdk` 0.18.9 (still the latest) moved from the server
 7. **Bot process lifecycle**: `fork(server/src/bots/process.ts, { cwd: server/, execArgv: ['--import', 'tsx'] })`. It stops when told to (last bot left, Remove bots, last host page left, room disposed; killed with SIGKILL if it hasn't exited after 2 s) and exits by itself when the IPC channel closes (server crash or shutdown). A bot that fails to join is reported back and logged on the server console.
 8. **A bots-only run is allowed** (the host watches from the host page). "The room returns to the lobby when every player leaves" still counts bots as players.
 9. **Perf report validation** (`sanitizePerfReport`, limits in `TUNING.log`): exact keys; tier `high`/`medium`/`low`; fps and 1% low finite, 0–1000; `w`, `h` whole pixels 1–16384; `dpr` 0.25–8. Values are rounded (fps 1 decimal, dpr 2). Reports from host pages, in the lobby, invalid ones and ones within 5 s of the last accepted one are rejected and counted.
-10. **Client side** (`client/src/net/perfReport.ts`): frames longer than 1 s (`TUNING.log.maxFrameMs`: hidden tab or frozen machine) are skipped, not counted. `FpsStats.low1()` takes an optional "newest N frames". The window restarts whenever the run is not running. The first `perf` line of a run (at 10 s) usually has no client reports yet: client and server both count 10 s from the start.
+10. **Client side** (`client/src/net/perfReport.ts`): frames longer than 1 s (`TUNING.log.maxFrameMs`: hidden tab or frozen machine) are skipped, not counted. **Changed 2026-11-09:** hidden tabs are now detected by the visibility event, and the cap is 10 s (see below). `FpsStats.low1()` takes an optional "newest N frames". The window restarts whenever the run is not running. The first `perf` line of a run (at 10 s) usually has no client reports yet: client and server both count 10 s from the start.
 11. **Docker check**: `tools/docker-check.sh` now also adds a bot in the container (`tools/host-bot-check.ts`).
 
 ### Checks (2026-11-03)
@@ -386,3 +386,15 @@ No new packages. `@colyseus/sdk` 0.18.9 (still the latest) moved from the server
 **Still open (parked):**
 
 - For audit 3: P2 (emoji tag characters as hidden text), P3 (a kicked address can still make HTTP reservations), P4 (per-address limits vs IP aliases), P7 (pin exact Colyseus versions?), P8 (no per-address connection cap).
+
+## 2026-11-09: Perf reporter: tab visibility instead of the 1 s frame cutoff
+
+- **Problem:** in the 2026-11-03 trial, JCCJ's client reports stopped at about 290 s. The reporter skipped every frame over 1 s as a stand-in for "hidden tab". A browser below 1 fps would therefore vanish from the log instead of showing up as slow.
+- **JCCJ's decision:** detect a hidden tab with the `visibilitychange` event, and keep a 10 s cap as a safety net. A closed laptop lid doesn't always fire the event.
+- **Changes:**
+  - `PerfReporter.hidden()` skips the one gap frame after the tab was hidden; `client/src/game.ts` calls it on `visibilitychange`.
+  - `TUNING.log.maxFrameMs` is now 10_000. Frames from 1 to 10 s now count in fps and the 1% low.
+- **Checks:**
+  - 4 new or changed reporter tests were written first and seen failing.
+  - 392 tests pass, along with 5 Playwright tests, lint and typecheck.
+  - Not checked by hand in a browser yet: switch tabs for about 20 s during a run, and the next `perf` line should still have the client's report. For the next playtest.
