@@ -645,7 +645,7 @@ No new packages. `@colyseus/sdk` 0.18.9 (still the latest) moved from the server
 - **JCCJ's `npm run dev` game** (`QKLC`): J + 3 bots, all Ember, 5 min 42 s, wave 9, 381 kills, wiped.
   - Server tick p95 at most 0.65 ms + patch 0.95 ms; at most 17.6 kB/s per client.
   - The client ran at about 60 fps on High, except 80–100 s (18 and 4 fps, frames up to about 10 s) and 320–340 s (1% low 5.8 fps). No client reports 230–310 s (tab most likely in the background).
-- **Open: the lobby showed no hero cards in JCCJ's game.** The built client (00:14) and the dev source both contain them, and Playwright sees them. Cause unknown; the leading guess is a browser tab still running a pre-1b.2 page. To check with a fresh tab and a hard reload, noting which address was used.
+- **Closed: the lobby showed no hero cards in JCCJ's game.** After a hard reload (Ctrl+Shift+R) on `localhost:5173`, the four cards appear (JCCJ, 2026-11-10). The cause was a browser tab still running a pre-1b.2 page. Not a game bug, so no regression test. Game-night tip: after an update, players reload the page.
 
 ## 2026-11-10: Pause added as slice 1b.3 (JCCJ)
 
@@ -667,4 +667,4 @@ No new packages. `@colyseus/sdk` 0.18.9 (still the latest) moved from the server
   - what bots do;
   - the perf reporter (count a pause like a hidden tab?) and the `perf` lines during a pause;
   - whether a player leaving or being kicked while paused changes anything.
-- **Before 1b.3:** settle the "no hero cards in the lobby" report from JCCJ's 2026-11-10 game (see the entry above). If it's a real bug, it gets a regression test first, as the brief requires.
+- **The "no hero cards" report is settled** (a stale browser tab, see above): nothing blocks 1b.3.
