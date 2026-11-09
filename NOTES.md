@@ -414,3 +414,14 @@ No new packages. `@colyseus/sdk` 0.18.9 (still the latest) moved from the server
   - `CHECK_PORT` overrides the port for the script's test only.
   - `tests/unit/tools/docker.test.ts` runs the script with a fake `sudo` that records its calls. A busy port must stop the script before `docker compose up`; a free port must reach it.
 - **The `NJGF` run** (J + Bot 1, 174 s): J's client reports are missing until 150 s. JCCJ confirmed the tab was in the background then, so this is expected, not a reporter bug.
+
+## 2026-11-09: Remaining 1a items deferred to 1f; 1a closed (JCCJ)
+
+- **Deviation from BRIEF.md.** The 1a acceptance criteria and milestone aren't fully met when 1a closes. JCCJ deferred these three items to **stage 1f** (game-night readiness):
+  1. **The 10-minute acceptance run:** 1 player + 7 bots, 10 minutes of play with no visible desync. The best so far is 7 minutes (2026-11-03).
+  2. **The game-night playtest:** the 1a milestone.
+  3. **The trackpad decision:** confirm the "disable touchpad while typing" cause, then choose between a hint/checklist, an auto-fire toggle, or nothing.
+- Also deferred, earlier today: the client fps check, to 1e.
+- **Done in 1a:** every 1a test passes (394 unit, integration and regression tests, plus 5 Playwright), lint is clean, and security audit 1 passed. The server load test passed, and the Docker check passed.
+- **For the 1f plan:** include all three items above. The 1c playtest still happens as the brief says, and it can give early answers on desync and the trackpad.
+- Stage 1b starts in a new session: "Read CLAUDE.md and NOTES.md. We are doing stage 1b."
