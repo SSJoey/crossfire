@@ -61,5 +61,16 @@ export async function startRun(
 }
 
 export function input(seq: number, patch: Partial<InputMessage> = {}): InputMessage {
-  return { seq, moveX: 0, moveZ: 0, aimX: 0, aimZ: 5, attack: false, revive: false, ...patch };
+  return {
+    seq,
+    moveX: 0,
+    moveZ: 0,
+    aimX: 0,
+    aimZ: 5,
+    attack: false,
+    revive: false,
+    cast: 'none',
+    qHeld: false,
+    ...patch,
+  };
 }

@@ -37,7 +37,9 @@ describe('bot brain', () => {
 
   it('does not attack when nothing is in range, or only spawning enemies are', () => {
     const me = unit('a', 0, 4);
-    expect(decide(view(me, [], [enemy(0, 4 + TUNING.ember.bolt.range + 3)]), TUNING).attack).toBe(false);
+    expect(decide(view(me, [], [enemy(0, 4 + TUNING.heroes.ember.bolt.range + 3)]), TUNING).attack).toBe(
+      false,
+    );
     expect(decide(view(me, [], [enemy(3, 4, 'spawning')]), TUNING).attack).toBe(false);
     expect(decide(view(me), TUNING).attack).toBe(false);
   });

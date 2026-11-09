@@ -23,12 +23,15 @@ export interface AppOptions {
   clientDir?: string;
   /** Tests only: the HTTP guard treats every caller as a LAN laptop. Never set in production. */
   lanClients?: boolean;
+  /** Accepts the 1–4 debug hero switch mid-run (CROSSFIRE_DEBUG=1). Never set in Docker. */
+  debugHeroSwitch?: boolean;
 }
 
 export function createApp(opts: AppOptions = {}) {
   const clientDir = opts.clientDir ?? DEFAULT_CLIENT_DIR;
   HoldRoom.botUrl = opts.botUrl;
   HoldRoom.treatLoopbackAsLan = opts.lanClients === true;
+  HoldRoom.debugHeroSwitch = opts.debugHeroSwitch === true;
   return defineServer({
     rooms: {
       [ROOM_NAME]: defineRoom(HoldRoom),

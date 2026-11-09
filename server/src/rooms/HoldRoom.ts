@@ -7,6 +7,8 @@ import {
   Room,
   ServerError,
 } from '@colyseus/core';
+import { isHeroId } from '@crossfire/shared/heroes';
+import { strongestSlow } from '@crossfire/shared/rules/abilities';
 import { loadTuning } from '@crossfire/shared/rules/loadtest';
 import {
   isLoopbackAddress,
@@ -16,11 +18,13 @@ import {
   sanitizeInput,
   sanitizeName,
   sanitizePerfReport,
+  sanitizePick,
   uniqueName,
 } from '@crossfire/shared/rules/validation';
 import { TUNING } from '@crossfire/shared/tuning';
 import {
   CLOSE,
+  ENEMY_FX,
   JOIN_ERRORS,
   MSG,
   ROOM_CODE_LETTERS,
@@ -37,7 +41,7 @@ import { logDir, MatchLog } from '../log/MatchLog';
 import { kBps, memoryMB, socketBytesWritten, TickStats } from '../log/perf';
 import { FixedTicker } from '../sim/tick';
 import { World, type WorldOptions } from '../sim/world';
-import { BoltState, EnemyState, HeroState, HoldState, PlayerState } from './state';
+import { BoltState, EnemyState, HeroState, HoldState, PlayerState, ZoneState } from './state';
 
 type Role = 'host' | 'player';
 interface AuthResult {
@@ -120,6 +124,8 @@ export class HoldRoom extends Room<{ state: HoldState }> {
    * createApp({ lanClients }). Never in production.
    */
   static treatLoopbackAsLan = false;
+  /** Accept the debug hero switch (createApp from CROSSFIRE_DEBUG=1). Never in production. */
+  static debugHeroSwitch = false;
   /** sessionId → socket address, for players. */
   private readonly seatIps = new Map<string, string>();
   private readonly kicks = new KickCooldown();
@@ -148,6 +154,7 @@ export class HoldRoom extends Room<{ state: HoldState }> {
   private readonly ticker = new FixedTicker(TUNING.tickHz, TUNING.maxCatchUpSteps, () => this.tick());
   private readonly enemyStates = new Map<number, EnemyState>();
   private readonly boltStates = new Map<number, BoltState>();
+  private readonly zoneStates = new Map<number, ZoneState>();
   private readonly seen = new Set<number>();
 
   // ---- match log and perf ----
@@ -220,6 +227,25 @@ export class HoldRoom extends Room<{ state: HoldState }> {
       this.accept(client);
       const p = this.state.players.get(client.sessionId);
       if (p && this.state.phase === 'lobby') p.ready = ready;
+    });
+
+    this.onMessage(MSG.pick, (client, payload: unknown) => {
+      const p = this.state.players.get(client.sessionId);
+      const hero = sanitizePick(payload);
+      if (!p || !hero || this.state.phase !== 'lobby') return this.reject(client);
+      this.accept(client);
+      p.hero = hero;
+    });
+
+    this.onMessage(MSG.debugHero, (client, payload: unknown) => {
+      const p = this.state.players.get(client.sessionId);
+      const hero = sanitizePick(payload);
+      if (!HoldRoom.debugHeroSwitch || !p || !hero || this.state.phase !== 'running')
+        return this.reject(client);
+      if (!this.world.switchHero(client.sessionId, hero)) return this.reject(client);
+      this.accept(client);
+      p.hero = hero;
+      this.syncState();
     });
 
     this.onMessage(MSG.start, (client) => {
@@ -527,19 +553,25 @@ export class HoldRoom extends Room<{ state: HoldState }> {
     for (const id of [...this.world.heroes.keys()]) this.world.removeHero(id);
     this.state.heroes.clear();
     for (const [id, p] of players) {
-      this.world.addHero(id, p.name);
+      const heroId = isHeroId(p.hero) ? p.hero : 'ember';
+      this.world.addHero(id, p.name, heroId);
       const hs = new HeroState();
       hs.name = p.name;
+      hs.hero = heroId;
       this.state.heroes.set(id, hs);
     }
     const t = now();
     this.world.start(t);
     this.setPhase('running');
     this.syncState();
+    // Null-prototype map keyed by player name (a player called __proto__ gets a real key).
+    const heroes = Object.create(null) as Record<string, string>;
+    for (const [, p] of players) heroes[p.name] = p.hero;
     this.openLog(
       t,
       players.map(([, p]) => p.name),
       players.filter(([, p]) => p.bot).map(([, p]) => p.name),
+      heroes,
     );
   }
 
@@ -551,8 +583,10 @@ export class HoldRoom extends Room<{ state: HoldState }> {
     this.state.heroes.clear();
     this.state.enemies.clear();
     this.state.bolts.clear();
+    this.state.zones.clear();
     this.enemyStates.clear();
     this.boltStates.clear();
+    this.zoneStates.clear();
     for (const p of this.state.players.values()) p.ready = false;
     this.state.wave = 0;
     this.setPhase('lobby');
@@ -598,7 +632,7 @@ export class HoldRoom extends Room<{ state: HoldState }> {
 
   // ---- match log ----
 
-  private openLog(t: number, names: string[], bots: string[]): void {
+  private openLog(t: number, names: string[], bots: string[], heroes: Record<string, string>): void {
     if (this.log) void this.endLog('aborted');
     this.runStartMs = t;
     this.lastPerfMs = t;
@@ -618,6 +652,7 @@ export class HoldRoom extends Room<{ state: HoldState }> {
       seed: this.seed,
       players: names,
       bots,
+      heroes,
     });
     this.log.write(t, { ev: 'waveStarted', wave: this.world.wave });
   }
@@ -705,6 +740,13 @@ export class HoldRoom extends Room<{ state: HoldState }> {
       s.bleedOut = h.bleedOut;
       s.reviveProgress = h.reviveProgress;
       s.lastSeq = Math.max(0, h.input.seq);
+      s.hero = h.heroId;
+      s.qCd = h.qCd;
+      s.eCd = h.eCd;
+      s.stoneSkin = h.stoneSkinT > 0;
+      s.dashing = h.dashT > 0;
+      s.act = h.act;
+      s.actSeq = h.actSeq;
     }
 
     this.seen.clear();
@@ -725,6 +767,10 @@ export class HoldRoom extends Room<{ state: HoldState }> {
       s.level = e.level;
       s.scale = e.scale;
       s.state = e.state;
+      s.fx =
+        (strongestSlow(e.zoneSlowFrac, e.zoneSlowT, e.boltSlowFrac, e.boltSlowT) > 0 ? ENEMY_FX.slowed : 0) |
+        (e.stunT > 0 ? ENEMY_FX.stunned : 0) |
+        (e.burnT > 0 ? ENEMY_FX.burning : 0);
     }
     for (const uid of this.enemyStates.keys()) {
       if (!this.seen.has(uid)) {
@@ -752,6 +798,28 @@ export class HoldRoom extends Room<{ state: HoldState }> {
       if (!this.seen.has(uid)) {
         this.boltStates.delete(uid);
         this.state.bolts.delete(String(uid));
+      }
+    }
+
+    this.seen.clear();
+    for (let i = 0; i < w.zones.count; i++) {
+      const zn = w.zones.items[i]!;
+      this.seen.add(zn.uid);
+      let s = this.zoneStates.get(zn.uid);
+      if (!s) {
+        s = new ZoneState();
+        s.x = zn.x;
+        s.z = zn.z;
+        s.element = zn.element;
+        this.zoneStates.set(zn.uid, s);
+        this.state.zones.set(String(zn.uid), s);
+      }
+      s.remaining = zn.remaining;
+    }
+    for (const uid of this.zoneStates.keys()) {
+      if (!this.seen.has(uid)) {
+        this.zoneStates.delete(uid);
+        this.state.zones.delete(String(uid));
       }
     }
   }

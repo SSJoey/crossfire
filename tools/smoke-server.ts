@@ -21,7 +21,17 @@ host.send('start', {});
 let seq = 1;
 const timer = setInterval(() => {
   for (const p of [a, b])
-    p.send('input', { seq, moveX: 1, moveZ: 0, aimX: 0, aimZ: 5, attack: true, revive: false });
+    p.send('input', {
+      seq,
+      moveX: 1,
+      moveZ: 0,
+      aimX: 0,
+      aimZ: 5,
+      attack: true,
+      revive: false,
+      cast: 'none',
+      qHeld: false,
+    });
   seq++;
 }, 50);
 const t0 = Date.now();

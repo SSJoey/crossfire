@@ -77,7 +77,7 @@ export function decide(v: BotView, t: Tuning): BotControls {
   if (foe) {
     out.aimX = foe.x;
     out.aimZ = foe.z;
-    out.attack = foeD <= t.ember.bolt.range;
+    out.attack = foeD <= t.heroes.ember.bolt.range;
   }
 
   // Nearest downed or dead teammate close enough to the ring.

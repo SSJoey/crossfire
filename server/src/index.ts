@@ -13,6 +13,11 @@ if (loadRooms)
 const botHost = host === '0.0.0.0' || host === '::' ? '127.0.0.1' : host;
 const botUrl = `http://${botHost.includes(':') ? `[${botHost}]` : botHost}:${port}`;
 
-const server = createApp({ loadRooms, botUrl });
+// The 1–4 debug hero switch is accepted only when this is set (`npm run dev` sets it).
+const debugHeroSwitch = process.env.CROSSFIRE_DEBUG === '1';
+if (debugHeroSwitch)
+  console.warn('CROSSFIRE_DEBUG=1: the debug hero switch is enabled. Not for game nights.');
+
+const server = createApp({ loadRooms, botUrl, debugHeroSwitch });
 await server.listen(port, host);
 console.log(`Crossfire server listening on ${host}:${port}`);

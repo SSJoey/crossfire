@@ -1,7 +1,16 @@
+import { isHeroId, type HeroId } from '../heroes';
 import { TUNING } from '../tuning';
-import { GFX_TIERS, JOIN_ERRORS, type GfxTier, type InputMessage, type PerfReport } from '../types';
+import {
+  CAST_IDS,
+  GFX_TIERS,
+  JOIN_ERRORS,
+  type CastId,
+  type GfxTier,
+  type InputMessage,
+  type PerfReport,
+} from '../types';
 
-const INPUT_KEYS = ['seq', 'moveX', 'moveZ', 'aimX', 'aimZ', 'attack', 'revive'] as const;
+const INPUT_KEYS = ['seq', 'moveX', 'moveZ', 'aimX', 'aimZ', 'attack', 'revive', 'cast', 'qHeld'] as const;
 const MAX_SEQ = 2 ** 31 - 1;
 
 function finiteInRange(v: unknown, maxAbs: number): v is number {
@@ -20,11 +29,12 @@ export function sanitizeInput(raw: unknown, net = TUNING.net, ring = TUNING.ring
   const o = raw as Record<string, unknown>;
   for (const k of INPUT_KEYS) if (!Object.hasOwn(o, k)) return null;
 
-  const { seq, moveX, moveZ, aimX, aimZ, attack, revive } = o;
+  const { seq, moveX, moveZ, aimX, aimZ, attack, revive, cast, qHeld } = o;
   if (typeof seq !== 'number' || !Number.isInteger(seq) || seq < 0 || seq > MAX_SEQ) return null;
   if (!finiteInRange(moveX, net.maxAbsNumber) || !finiteInRange(moveZ, net.maxAbsNumber)) return null;
   if (!finiteInRange(aimX, net.maxAbsNumber) || !finiteInRange(aimZ, net.maxAbsNumber)) return null;
-  if (typeof attack !== 'boolean' || typeof revive !== 'boolean') return null;
+  if (typeof attack !== 'boolean' || typeof revive !== 'boolean' || typeof qHeld !== 'boolean') return null;
+  if (typeof cast !== 'string' || !(CAST_IDS as readonly string[]).includes(cast)) return null;
 
   let mx = moveX;
   let mz = moveZ;
@@ -40,7 +50,16 @@ export function sanitizeInput(raw: unknown, net = TUNING.net, ring = TUNING.ring
     ax *= ring.mapRadius / ad;
     az *= ring.mapRadius / ad;
   }
-  return { seq, moveX: mx, moveZ: mz, aimX: ax, aimZ: az, attack, revive };
+  return { seq, moveX: mx, moveZ: mz, aimX: ax, aimZ: az, attack, revive, cast: cast as CastId, qHeld };
+}
+
+/** Validates a hero pick (or debug switch) payload `{ hero }`. Returns the hero id or null. */
+export function sanitizePick(raw: unknown): HeroId | null {
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return null;
+  const keys = Object.keys(raw);
+  if (keys.length !== 1 || keys[0] !== 'hero') return null;
+  const hero = (raw as Record<string, unknown>).hero;
+  return isHeroId(hero) ? hero : null;
 }
 
 const PERF_KEYS = ['tier', 'fps', 'low1', 'w', 'h', 'dpr'] as const;

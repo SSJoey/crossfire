@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { assistTarget, type AimTarget } from '@crossfire/shared/rules/aim';
 import { TUNING } from '@crossfire/shared/tuning';
 
-const range = TUNING.ember.bolt.range;
+const range = TUNING.heroes.ember.bolt.range;
 const cone = TUNING.aim.assistCone;
 
 function e(x: number, z: number, targetable = true): AimTarget {

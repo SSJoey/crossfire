@@ -14,7 +14,18 @@ function tuning(patch: (t: Tuning) => void): Tuning {
 }
 
 function idle(seq: number, patch: Partial<InputMessage> = {}): InputMessage {
-  return { seq, moveX: 0, moveZ: 0, aimX: 0, aimZ: 5, attack: false, revive: false, ...patch };
+  return {
+    seq,
+    moveX: 0,
+    moveZ: 0,
+    aimX: 0,
+    aimZ: 5,
+    attack: false,
+    revive: false,
+    cast: 'none',
+    qHeld: false,
+    ...patch,
+  };
 }
 
 function makeWorld(
@@ -143,7 +154,7 @@ describe('edge: enemy cap reached', () => {
     const t = tuning((t) => {
       t.waves.enemyCap = 10;
       t.waves.base = 50;
-      t.ember.maxHp = 1e7;
+      t.heroes.ember.maxHp = 1e7;
     });
     const { w, step } = makeWorld(['a'], t);
     let max = 0;

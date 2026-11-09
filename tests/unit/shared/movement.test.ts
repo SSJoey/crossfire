@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { stepHero } from '@crossfire/shared/rules/movement';
 import { TUNING } from '@crossfire/shared/tuning';
 
-const speed = TUNING.ember.speed;
+const speed = TUNING.heroes.ember.speed;
 
 describe('hero movement', () => {
   it('moves at the hero speed', () => {

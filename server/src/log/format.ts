@@ -9,7 +9,16 @@ export type EndReason = 'wiped' | 'aborted' | 'empty';
 export type LeaveReason = 'left' | 'kicked' | 'flooded' | 'protocol';
 
 export type LogEvent =
-  | { ev: 'start'; at: string; code: string; seed: number; players: string[]; bots: string[] }
+  | {
+      ev: 'start';
+      at: string;
+      code: string;
+      seed: number;
+      players: string[];
+      bots: string[];
+      /** Hero per player name (stage 1b). */
+      heroes: Record<string, string>;
+    }
   | { ev: 'waveStarted'; wave: number }
   | { ev: 'waveCleared'; wave: number }
   | { ev: 'downed'; name: string }

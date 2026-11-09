@@ -284,6 +284,7 @@ One line each. Nothing here enters Phase 1 unless something of equal size leaves
 - Quaternius art style (tested and not chosen).
 - Rocket launcher, bombing run and adrenaline power-ups.
 - The element orb power-up.
+- In-run XP that levels up Q, E and passive (2026-11-09; kit numbers already go through `heroKit(id, level)`).
 - Mobile and touch controls.
 - Internet play and accounts.
 - Meta progression between runs.

@@ -76,6 +76,9 @@ export class Game {
     aimZ: 0,
     attack: false,
     revive: false,
+    // Q and E controls arrive in slice 1b.2; until then the client never casts.
+    cast: 'none',
+    qHeld: false,
   };
   private readonly move = { x: 0, z: 0 };
   private readonly aim = { x: 0, z: 4 };
@@ -464,7 +467,7 @@ export class Game {
     const standing = this.myStatus === 'standing';
     this.reticle.setVisible(standing);
     if (standing) {
-      const range = TUNING.ember.bolt.range;
+      const range = TUNING.heroes.ember.bolt.range;
       this.reticle.update(meX, meZ, this.aim.x, this.aim.z, range);
       const i = TUNING.aim.assistOn
         ? assistTarget(meX, meZ, this.aim.x, this.aim.z, range, TUNING.aim.assistCone, this.aimTargets, n)

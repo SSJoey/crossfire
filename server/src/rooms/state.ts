@@ -7,6 +7,8 @@ export const PlayerState = schema(
     ready: t.boolean().default(false),
     /** Added from the host page (marked by the server, never by the client). */
     bot: t.boolean().default(false),
+    /** Picked hero id (stage 1b). */
+    hero: t.string().default('ember'),
   },
   'PlayerState',
 );
@@ -25,6 +27,18 @@ export const HeroState = schema(
     reviveProgress: t.float32().default(0),
     /** Last input applied, for the owner's prediction reconciliation. */
     lastSeq: t.uint32().default(0),
+    /** Hero id (stage 1b). */
+    hero: t.string().default('ember'),
+    /** Q and E cooldowns left (s), for the HUD. */
+    qCd: t.float32().default(0),
+    eCd: t.float32().default(0),
+    /** Bastion's Stone skin is up. */
+    stoneSkin: t.boolean().default(false),
+    /** Gale is dashing. */
+    dashing: t.boolean().default(false),
+    /** What the hero last did ('attack', 'q', 'e'), with a counter that changes each time. */
+    act: t.string().default(''),
+    actSeq: t.uint8().default(0),
   },
   'HeroState',
 );
@@ -40,6 +54,8 @@ export const EnemyState = schema(
     level: t.uint16().default(1),
     scale: t.float32().default(1),
     state: t.string().default('spawning'),
+    /** Status effects for visuals: ENEMY_FX bits (slowed, stunned, burning). */
+    fx: t.uint8().default(0),
   },
   'EnemyState',
 );
@@ -56,6 +72,19 @@ export const BoltState = schema(
 );
 export type BoltState = SchemaType<typeof BoltState>;
 
+/** A Q zone on the ground (stage 1b). */
+export const ZoneState = schema(
+  {
+    x: t.float32().default(0),
+    z: t.float32().default(0),
+    element: t.string().default('fire'),
+    /** Seconds left. */
+    remaining: t.float32().default(0),
+  },
+  'ZoneState',
+);
+export type ZoneState = SchemaType<typeof ZoneState>;
+
 export const HoldState = schema(
   {
     phase: t.string().default('lobby'),
@@ -66,6 +95,7 @@ export const HoldState = schema(
     heroes: t.map(HeroState),
     enemies: t.map(EnemyState),
     bolts: t.map(BoltState),
+    zones: t.map(ZoneState),
   },
   'HoldState',
 );

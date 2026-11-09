@@ -121,7 +121,8 @@ export class Bot {
       v.enemies.push(u);
     });
     const c = decide(v, TUNING);
-    const msg: InputMessage = { seq: this.seq++, ...c };
+    // Bots stay Ember and use no Q or E in stage 1b (NOTES.md 2026-11-09).
+    const msg: InputMessage = { seq: this.seq++, ...c, cast: 'none', qHeld: false };
     room.send(MSG.input, msg);
   }
 }

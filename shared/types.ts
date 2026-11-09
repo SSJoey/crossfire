@@ -11,6 +11,10 @@ export type HeroStatus = 'standing' | 'downed' | 'dead';
 export type Phase = 'lobby' | 'running' | 'ended';
 export type WaveState = 'spawning' | 'break';
 
+/** Ability ids an input can carry: nothing, the Q zone or the E utility. */
+export const CAST_IDS = ['none', 'q', 'e'] as const;
+export type CastId = (typeof CAST_IDS)[number];
+
 /** The only gameplay message a client sends: its current controls. */
 export interface InputMessage {
   /** Increases with every input; older or repeated numbers are ignored. */
@@ -25,6 +29,13 @@ export interface InputMessage {
   attack: boolean;
   /** F held (revive). */
   revive: boolean;
+  /**
+   * A one-shot cast: 'q' in the input after Q is released, 'e' in the input after E is
+   * pressed, otherwise 'none'. The server drops a cast it refuses (it is never queued).
+   */
+  cast: CastId;
+  /** Q held (zone preview). */
+  qHeld: boolean;
 }
 
 /** Graphics tiers a client can run at. */
@@ -58,6 +69,17 @@ export const MSG = {
   removeBots: 'removeBots',
   /** Player only, during a run: a PerfReport. */
   perf: 'perf',
+  /** Player only, lobby only: `{ hero: HeroId }`. */
+  pick: 'pick',
+  /** Player only, during a run, only on a server with CROSSFIRE_DEBUG=1: `{ hero: HeroId }`. */
+  debugHero: 'debugHero',
+} as const;
+
+/** Bits of `EnemyState.fx`: status effects the client shows. */
+export const ENEMY_FX = {
+  slowed: 1,
+  stunned: 2,
+  burning: 4,
 } as const;
 
 /** Server → client message types. */

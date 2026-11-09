@@ -6,7 +6,18 @@ import { World } from '../../../server/src/sim/world';
 const TICK_MS = 1000 / TUNING.tickHz;
 
 function input(seq: number, patch: Partial<InputMessage> = {}): InputMessage {
-  return { seq, moveX: 0, moveZ: 0, aimX: 0, aimZ: 5, attack: false, revive: false, ...patch };
+  return {
+    seq,
+    moveX: 0,
+    moveZ: 0,
+    aimX: 0,
+    aimZ: 5,
+    attack: false,
+    revive: false,
+    cast: 'none',
+    qHeld: false,
+    ...patch,
+  };
 }
 
 describe('World basics', () => {
@@ -56,7 +67,7 @@ describe('World basics', () => {
   });
 
   it('a bolt kills a level-1 minion in 3 hits', () => {
-    expect(Math.ceil(TUNING.minion.baseHp / TUNING.ember.bolt.damage)).toBe(3);
+    expect(Math.ceil(TUNING.minion.baseHp / TUNING.heroes.ember.bolt.damage)).toBe(3);
   });
 
   it('heroes start around the hold point inside the ring', () => {
@@ -67,7 +78,7 @@ describe('World basics', () => {
       const d = Math.hypot(h.x, h.z);
       expect(d).toBeGreaterThanOrEqual(TUNING.ring.holdRadius);
       expect(d).toBeLessThan(TUNING.ring.radius);
-      expect(h.hp).toBe(TUNING.ember.maxHp);
+      expect(h.hp).toBe(TUNING.heroes.ember.maxHp);
     }
   });
 });

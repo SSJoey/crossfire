@@ -18,7 +18,7 @@
     "test:watch": "vitest",
     "server": "npm run start -w server",
     "smoke:server": "tsx tools/smoke-server.ts",
-    "dev": "node --run server & npm run dev -w client",
+    "dev": "CROSSFIRE_DEBUG=1 node --run server & npm run dev -w client",
     "build": "npm run build -w client",
     "fetch-assets": "node tools/fetch-assets.mjs",
     "assets": "node tools/assets.mjs",

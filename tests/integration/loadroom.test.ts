@@ -71,7 +71,7 @@ describe('load room (CROSSFIRE_LOAD_ROOM)', () => {
       expect(room.world.kills).toBeGreaterThan(0);
       for (const h of room.world.heroes.values()) {
         expect(h.status).toBe('standing');
-        expect(h.hp).toBe(TUNING.ember.maxHp);
+        expect(h.hp).toBe(TUNING.heroes.ember.maxHp);
       }
       const outside = [...room.world.heroes.values()].some((h) => Math.hypot(h.x, h.z) > TUNING.ring.radius);
       expect(outside).toBe(true);

@@ -12,7 +12,7 @@ export interface PredictorOptions {
 }
 
 const DEFAULTS: PredictorOptions = {
-  speed: TUNING.ember.speed,
+  speed: TUNING.heroes.ember.speed,
   dt: 1 / TUNING.tickHz,
   cap: TUNING.client.pendingInputCap,
   snapDistance: TUNING.client.snapDistance,

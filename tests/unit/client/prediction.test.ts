@@ -4,7 +4,7 @@ import { TUNING } from '@crossfire/shared/tuning';
 import { Predictor } from '../../../client/src/net/prediction';
 
 const DT = 1 / TUNING.tickHz;
-const SPEED = TUNING.ember.speed;
+const SPEED = TUNING.heroes.ember.speed;
 
 function predictor(): Predictor {
   const p = new Predictor();

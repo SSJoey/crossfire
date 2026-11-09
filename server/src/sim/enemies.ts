@@ -23,6 +23,24 @@ export interface SimEnemy {
   targetId: string | null;
   /** Read by aim assist: false while spawning or dead. */
   targetable: boolean;
+  /** Stun time left: no walking, no swings (s). */
+  stunT: number;
+  /** Burn (Kindle): time left and damage per second. */
+  burnT: number;
+  burnDps: number;
+  /** Slow from a zone (refreshed while inside) and from a bolt (Undertow); the strongest wins. */
+  zoneSlowFrac: number;
+  zoneSlowT: number;
+  boltSlowFrac: number;
+  boltSlowT: number;
+  /** Taunt (Stone skin): the hero this enemy must target, and for how long. */
+  tauntId: string | null;
+  tauntT: number;
+  /** Knockback velocity, decaying (m/s). */
+  kvx: number;
+  kvz: number;
+  /** The last Gust dash that knocked this enemy (each dash knocks it once). */
+  dashHitId: number;
 }
 
 function blank(): SimEnemy {
@@ -43,6 +61,18 @@ function blank(): SimEnemy {
     swingCd: 0,
     targetId: null,
     targetable: false,
+    stunT: 0,
+    burnT: 0,
+    burnDps: 0,
+    zoneSlowFrac: 0,
+    zoneSlowT: 0,
+    boltSlowFrac: 0,
+    boltSlowT: 0,
+    tauntId: null,
+    tauntT: 0,
+    kvx: 0,
+    kvz: 0,
+    dashHitId: 0,
   };
 }
 
@@ -76,6 +106,18 @@ export class EnemyPool {
     e.swingCd = 0;
     e.targetId = null;
     e.targetable = false;
+    e.stunT = 0;
+    e.burnT = 0;
+    e.burnDps = 0;
+    e.zoneSlowFrac = 0;
+    e.zoneSlowT = 0;
+    e.boltSlowFrac = 0;
+    e.boltSlowT = 0;
+    e.tauntId = null;
+    e.tauntT = 0;
+    e.kvx = 0;
+    e.kvz = 0;
+    e.dashHitId = 0;
     return e;
   }
 

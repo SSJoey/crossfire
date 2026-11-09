@@ -425,3 +425,107 @@ No new packages. `@colyseus/sdk` 0.18.9 (still the latest) moved from the server
 - **Done in 1a:** every 1a test passes (394 unit, integration and regression tests, plus 5 Playwright), lint is clean, and security audit 1 passed. The server load test passed, and the Docker check passed.
 - **For the 1f plan:** include all three items above. The 1c playtest still happens as the brief says, and it can give early answers on desync and the trackpad.
 - Stage 1b starts in a new session: "Read CLAUDE.md and NOTES.md. We are doing stage 1b."
+
+## 2026-11-09: Stage 1b planning (answers from JCCJ)
+
+### Process
+
+- Stage 1b is split into two slices, one per session:
+  - **1b.1:** `shared/` (kits, tuning, ability rules, validation) and the server (pick, casts, zones, status effects, melee). Headless.
+  - **1b.2:** assets (Knight, Rogue, Rogue_Hooded + clips), client hero visuals, Tide recolour, HUD ability slots, lobby pick UI, prediction of Flame step / Gust dash, Playwright.
+
+### Kits (the definition `shared/heroes.ts` must match)
+
+- **Base stats and basic attacks are the look-test values.** All heroes have 400 HP, radius 0.5.
+  - Ember (fire, ranged): speed 5.4; Fire bolt 20 dmg every 0.55 s, range 12, 22 m/s.
+  - Bastion (earth, melee): speed 4.8; Sword chop 34 dmg every 0.8 s, reach 2.4 m.
+  - Tide (water, ranged): speed 5.2; Water bolt 16 dmg every 0.6 s, range 12, 22 m/s.
+  - Gale (air, melee): speed 6.4; Twin daggers 22 dmg every 0.45 s, reach 2.2 m.
+- **Melee hits** every risen enemy within reach + 0.4 m inside a front arc (cos ≥ 0.35) and knocks it back at 2.5 m/s, decaying. Aim assist picks the facing within reach + 1.2 m.
+  - Deviation from the look test: no 0.25 m lunge (it would fight own-hero prediction), and the hit lands instantly instead of after 0.2 s.
+- **Q zones** (JCCJ: distinct per element). Every zone has radius 3 m, lasts 4.2 s, cast range 11 m (clamped), cooldown 5 s.
+  - Fire zone: 14 dmg/s.
+  - Quake slam: 30 dmg on cast + 1 s stun, then 6 dmg/s.
+  - Tidal pool: 6 dmg/s + 50% slow.
+  - Cyclone: 6 dmg/s + pull to the centre at 2 m/s.
+- **E utilities and passives** (proposed by Claude, approved by JCCJ):
+  - Ember. E **Flame step**: blink up to 6 m toward the aim, cd 8 s. Passive **Kindle**: bolt hits burn 4 dmg/s for 2 s (a new hit refreshes; no stacking).
+  - Bastion. E **Stone skin**: −60% damage taken for 4 s, and enemies within 6 m target him for 4 s; cd 14 s. Passive **Steadfast**: −15% damage taken, always (with Stone skin: ×0.85 × 0.4).
+  - Tide. E **Mending wave**: heals Tide and standing allies within 6 m for 30% of max HP, capped at max; doesn't revive; cd 16 s. Passive **Undertow**: bolt hits slow 30% for 1.5 s.
+  - Gale. E **Gust dash**: 7 m toward the aim over 0.25 s; enemies along the path are knocked 3 m aside; cd 7 s. Passive **Tailwind**: every 4th swing that hits deals ×2 to everything it hits.
+
+### Other answers
+
+- **Props:** Bastion keeps 1H_Sword + Round_Shield; Tide keeps 1H_Crossbow; Gale keeps Knife + Knife_Offhand. Everything else is dropped.
+- **1–4 debug hero switch:** only with `?debug=1`.
+- **XP scaling (JCCJ idea):** parked as "In-run XP that levels up Q, E and passive". Light hook in 1b: every kit number is read through `heroKit(id, level)`, and level is always 1. No XP, no level-ups, no UI.
+
+### Defaults approved with the 1b plan
+
+1. `InputMessage` gains `cast: 'none' | 'q' | 'e'` (an ability id) and `qHeld: boolean`.
+   - The client sends `cast: 'q'` in the one input after Q is released.
+   - The server latches the cast until the next tick, so a cast between ticks isn't lost.
+2. A refused cast is dropped, not queued (downed, dead, on cooldown, stale input). A refused cast doesn't start a cooldown.
+3. **The debug switch is double-gated:** `?debug=1` on the client, and the server accepts `debugHero` only with `CROSSFIRE_DEBUG=1` (`npm run dev` sets it; Docker never does).
+   - It keeps the HP fraction and the remaining Q/E cooldowns.
+   - Standing heroes only, at most one switch per second.
+4. **Hero pick:** `pick { hero }` in the lobby only, validated as an own key of the hero table. Allowed whether or not the player is ready. Default Ember.
+5. **Duplicates stack.** Same-element zones each apply their damage; slows take the strongest; stuns refresh. A second Bastion's taunt takes over (the latest caster wins). Two Tides' heals each apply, each capped.
+6. Zones and status effects skip enemies that are still rising. Kills by zones and burns count in `kills`.
+7. **Deviation:** `server/src/sim/zones.ts` is listed under 1c in BRIEF.md; it's created in 1b because Q needs it. Combos are added to it in 1c.
+8. Bots stay Ember and don't use Q or E in 1b. Bot hero variety → 1e.
+9. The match log's `start` line gains `heroes: { name: heroId }`. No cast events (combo events come in 1c).
+10. Tide recolour (1b.2): a runtime material colour multiply of 0xa9c6ff on the whole model, as in the look test. KayKit uses one texture-atlas material, so the skin is tinted too.
+
+## 2026-11-09: Slice 1b.1 build notes
+
+### Versions
+
+- No new packages. `@colyseus/schema` is installed at 5.0.43; the registry has 5.0.45 (patch). Not upgraded in this slice. `t.uint8()`, `t.boolean()` and `t.map()` were checked in the installed package.
+
+### Implementation choices (not in the brief; for review)
+
+1. **Order inside a tick.** For each hero: cooldowns tick down, then the latched cast (Q or E), then movement (or the dash), then the basic attack, then the ring drain. After the heroes: zones, enemies, burns, bolts. So a zone acts on its own cast tick, and Gust dash ignores move input from its first tick.
+2. **Quake slam's stun cancels a swing in wind-up.** A stunned minion neither walks nor starts a swing.
+3. **Gale passes through enemies while dashing** (not solid to them during the dash). The knockback check is swept along each tick's path, so a fast dash can't skip an enemy. Each dash knocks an enemy once; the dash has its own id.
+4. **Knockback** is a decaying velocity (rate `knockbackDecayPerSec` 4/s). Gust dash sets the start speed so the slide is exactly 3 m. A melee hit adds 2.5 m/s (look test), about 0.7 m of slide.
+5. **Slows** have two slots, zone and bolt; the strongest active one wins. A Tidal pool's slow lasts 0.2 s after the minion leaves the pool (`slowHoldSec`).
+6. **Taunt** only catches risen enemies. It ends early if Bastion stops standing.
+7. **Kindle and Undertow** apply only when the bolt doesn't kill. A bolt carries its owner's hero at fire time.
+8. **A full zone pool** (32) refuses the cast without starting the cooldown. It can't fill in normal play: at most 8 zones are alive.
+9. **Synced state additions:**
+   - `PlayerState.hero`;
+   - `HeroState`: `hero`, `qCd`, `eCd`, `stoneSkin`, `dashing`, `act` + `actSeq` (`dashing` wasn't in the plan; it's for the 1b.2 dash visual);
+   - `ZoneState` (x, z, element, remaining);
+   - `EnemyState.fx`, a bitmask of slowed, stunned and burning (`ENEMY_FX`).
+10. **Client until 1b.2:** it sends `cast: 'none'`, `qHeld: false` and still predicts with Ember's speed. That's fine while the join screen has no hero pick: everyone is Ember.
+11. `npm run dev` now sets `CROSSFIRE_DEBUG=1`. The production server and Docker don't.
+12. **The XP idea** is now one line in BRIEF.md's parked list (the brief's rule: new ideas go to the parked list).
+
+### Changed existing tests (mechanical)
+
+- `TUNING.ember` → `TUNING.heroes.ember` everywhere.
+- The `input()` helpers (unit, edge, integration) and the validation fixture gain `cast` and `qHeld`.
+- The match log tests' `start` lines gain `heroes`.
+
+### Test-first record
+
+- 69 new tests were written first and seen failing: `abilities`, `heroes` (sim), validation additions, `integration/heroes`.
+- **Corrected before any code:** I re-checked my own test arithmetic before writing code and found these mistakes:
+  - **Tick counting.** A zone also acts on its cast tick; Q spam over 30 s gives ⌈30/cd⌉ casts.
+  - **Ring drain.** The quiet test world turns drain off, so blinking or dashing heroes don't lose HP outside the ring.
+  - **Melee tests.** They pin their target, because knockback pushes it out of reach.
+  - **Two tests that measured nothing:**
+    - Kindle refresh: the old test was trivially true. It now checks that every burn-only tick deals 4/s × dt.
+    - "Cast before going down": with one hero it ended the run instead. It now has a second hero.
+  - **The Undertow-in-pool test** cast from out of range. Its caster now stands within 11 m.
+- **Fixed after the first run:** two test setups. The Cyclone test moved its caster 20 m away before casting. The Gust dash test put the "off-path" minion exactly where the knocked one slides to.
+
+### Checks (2026-11-09)
+
+- **Tests:** 499 unit, integration and regression tests pass (394 before). Lint and typecheck are clean. Playwright was not run (no client change beyond the two input keys); it runs in 1b.2.
+- **Server smoke run** (`tools/smoke-server.ts`): lobby → running → ended after 17.9 s.
+- **Load test,** 2 minutes, 8 bots, 120 enemies: PASSED.
+  - Tick p95 0.95 ms + patch 0.9 ms = **1.9 ms** (1a: 1.7 ms).
+  - Bandwidth **42.7 kB/s** per client (1a: 42.5).
+  - 810 kills (6.8/s against 4.8/s in the 1a run; Kindle's burns add damage).

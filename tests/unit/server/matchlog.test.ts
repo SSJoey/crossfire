@@ -37,8 +37,13 @@ describe('log format', () => {
       seed: 1,
       players: ['Ann', 'Bot 1'],
       bots: ['Bot 1'],
+      heroes: { Ann: 'gale', 'Bot 1': 'ember' },
     });
-    expect(JSON.parse(start)).toMatchObject({ players: ['Ann', 'Bot 1'], bots: ['Bot 1'] });
+    expect(JSON.parse(start)).toMatchObject({
+      players: ['Ann', 'Bot 1'],
+      bots: ['Bot 1'],
+      heroes: { Ann: 'gale', 'Bot 1': 'ember' },
+    });
     const perf = logLine(10000, {
       ev: 'perf',
       tickP95Ms: 1,
@@ -111,6 +116,7 @@ describe('MatchLog', () => {
       seed: 7,
       players: ['Ann', 'Bo'],
       bots: [],
+      heroes: { Ann: 'ember', Bo: 'tide' },
     });
     log.write(1500, { ev: 'waveStarted', wave: 1 });
     log.write(9000, {

@@ -8,11 +8,22 @@ import {
   sanitizeInput,
   sanitizeName,
   sanitizePerfReport,
+  sanitizePick,
   uniqueName,
 } from '@crossfire/shared/rules/validation';
 import { TUNING } from '@crossfire/shared/tuning';
 
-const good = { seq: 1, moveX: 0.5, moveZ: -0.5, aimX: 3, aimZ: 4, attack: true, revive: false };
+const good = {
+  seq: 1,
+  moveX: 0.5,
+  moveZ: -0.5,
+  aimX: 3,
+  aimZ: 4,
+  attack: true,
+  revive: false,
+  cast: 'none',
+  qHeld: false,
+};
 
 describe('sanitizeInput', () => {
   it('accepts a valid input', () => {
@@ -71,6 +82,53 @@ describe('sanitizeInput', () => {
   it('does not throw on nested junk', () => {
     expect(sanitizeInput({ ...good, moveX: { valueOf: () => 1 } })).toBeNull();
     expect(sanitizeInput({ ...good, aimX: [1] })).toBeNull();
+  });
+
+  it('accepts the three cast ids (stage 1b)', () => {
+    for (const cast of ['none', 'q', 'e']) expect(sanitizeInput({ ...good, cast })!.cast).toBe(cast);
+    expect(sanitizeInput({ ...good, qHeld: true })!.qHeld).toBe(true);
+  });
+
+  it.each(['Q', 'E', 'r', '', 'zone', '__proto__', 'none ', 0, 1, true, null, ['q'], { q: 1 }])(
+    'rejects cast %s',
+    (cast) => {
+      expect(sanitizeInput({ ...good, cast })).toBeNull();
+    },
+  );
+
+  it('rejects a non-boolean qHeld and inputs without the new keys', () => {
+    expect(sanitizeInput({ ...good, qHeld: 1 })).toBeNull();
+    expect(sanitizeInput({ ...good, qHeld: 'true' })).toBeNull();
+    const { cast: _c, ...noCast } = good;
+    expect(sanitizeInput(noCast)).toBeNull();
+    const { qHeld: _q, ...noQ } = good;
+    expect(sanitizeInput(noQ)).toBeNull();
+  });
+});
+
+describe('sanitizePick (stage 1b)', () => {
+  it('accepts each hero id', () => {
+    for (const hero of ['ember', 'bastion', 'tide', 'gale']) expect(sanitizePick({ hero })).toBe(hero);
+  });
+
+  it.each([
+    { hero: '__proto__' },
+    { hero: 'constructor' },
+    { hero: 'toString' },
+    { hero: 'Ember' },
+    { hero: 'brand' },
+    { hero: 'x'.repeat(10_000) },
+    { hero: 1 },
+    { hero: ['ember'] },
+    { hero: null },
+    { hero: 'ember', extra: 1 },
+    {},
+    null,
+    'ember',
+    ['ember'],
+    42,
+  ])('rejects %j', (bad) => {
+    expect(sanitizePick(bad)).toBeNull();
   });
 });
 

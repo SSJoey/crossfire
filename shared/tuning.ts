@@ -23,21 +23,101 @@ export const TUNING = {
     heroStartRadius: 3.6,
   },
 
-  ember: {
-    maxHp: 400,
-    speed: 5.4,
-    /** Collision circle radius. */
-    radius: 0.5,
-    bolt: {
-      damage: 20,
-      intervalSec: 0.55,
-      range: 12,
-      /** Not in the look test: starting value. */
-      speed: 22,
-      /** Extra hit radius of the bolt point against an enemy circle. */
-      hitRadius: 0.15,
+  /**
+   * The four hero kits (stage 1b; NOTES.md 2026-11-09). Base stats and basic attacks are
+   * look-test values; E utilities and passives were agreed with JCCJ. Read them through
+   * `heroKit(id, level)` in shared/heroes.ts.
+   */
+  heroes: {
+    ember: {
+      maxHp: 400,
+      speed: 5.4,
+      /** Collision circle radius. */
+      radius: 0.5,
+      bolt: {
+        damage: 20,
+        intervalSec: 0.55,
+        range: 12,
+        /** Not in the look test: starting value. */
+        speed: 22,
+        /** Extra hit radius of the bolt point against an enemy circle. */
+        hitRadius: 0.15,
+      },
+      /** Flame step: blink toward the aim. */
+      utility: { cooldownSec: 8, range: 6 },
+      /** Kindle: bolt hits burn (a new hit refreshes the timer; no stacking). */
+      passive: { burnDps: 4, burnSec: 2 },
+    },
+    bastion: {
+      maxHp: 400,
+      speed: 4.8,
+      radius: 0.5,
+      melee: { damage: 34, intervalSec: 0.8, reach: 2.4 },
+      /** Stone skin: damage reduction and a taunt around him. */
+      utility: { cooldownSec: 14, durationSec: 4, damageTakenMul: 0.4, tauntRadius: 6, tauntSec: 4 },
+      /** Steadfast: always takes less damage. */
+      passive: { damageTakenMul: 0.85 },
+    },
+    tide: {
+      maxHp: 400,
+      speed: 5.2,
+      radius: 0.5,
+      bolt: { damage: 16, intervalSec: 0.6, range: 12, speed: 22, hitRadius: 0.15 },
+      /** Mending wave: heals self and standing allies around. */
+      utility: { cooldownSec: 16, radius: 6, healFrac: 0.3 },
+      /** Undertow: bolt hits slow. */
+      passive: { slowFrac: 0.3, slowSec: 1.5 },
+    },
+    gale: {
+      maxHp: 400,
+      speed: 6.4,
+      radius: 0.5,
+      melee: { damage: 22, intervalSec: 0.45, reach: 2.2 },
+      /**
+       * Gust dash: `distance` toward the aim over `durationSec`. Enemies whose circle comes
+       * within `pathWidth` of the hero during the dash are knocked `knockback` metres aside.
+       */
+      utility: { cooldownSec: 7, distance: 7, durationSec: 0.25, knockback: 3, pathWidth: 1 },
+      /** Tailwind: every `every`-th swing that hits deals `mult` × damage. */
+      passive: { every: 4, mult: 2 },
     },
   },
+
+  /** Melee basic attacks (look test). */
+  melee: {
+    /** A swing hits enemies whose centre is within reach + this. */
+    extraReach: 0.4,
+    /** Front arc: cos of the angle between facing and the enemy must be at least this. */
+    arcCos: 0.35,
+    /** Knockback speed given to each enemy hit (m/s); it decays with `knockbackDecayPerSec`. */
+    knockbackSpeed: 2.5,
+    /** Aim assist looks this much beyond reach to pick the swing's facing. */
+    assistExtra: 1.2,
+  },
+
+  /** Exponential decay rate of enemy knockback velocity (1/s). Total slide = speed / rate. */
+  knockbackDecayPerSec: 4,
+
+  /** Q zones (stage 1b): shared size, duration, range and cooldown; effects per element. */
+  zones: {
+    radius: 3,
+    durationSec: 4.2,
+    castRange: 11,
+    cooldownSec: 5,
+    /** Most zones alive at once (8 heroes with a 5 s cooldown keep at most 8). */
+    cap: 32,
+    /** Fire zone. */
+    fire: { dps: 14 },
+    /** Quake slam: damage and stun when cast, then a weak burn. */
+    earth: { dps: 6, impactDamage: 30, stunSec: 1 },
+    /** Tidal pool: slow while inside (refreshed each tick for `slowHoldSec`). */
+    water: { dps: 6, slowFrac: 0.5, slowHoldSec: 0.2 },
+    /** Cyclone: pulls enemies to the centre. */
+    air: { dps: 6, pullSpeed: 2 },
+  },
+
+  /** Debug hero switch (1–4, only with ?debug=1 and CROSSFIRE_DEBUG=1): at most once per this. */
+  heroSwitchSec: 1,
 
   minion: {
     baseHp: 42,
