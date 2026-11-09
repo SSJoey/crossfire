@@ -638,3 +638,33 @@ No new packages. `@colyseus/sdk` 0.18.9 (still the latest) moved from the server
 
 - **Tide's tint looks teal-green, not blue.** A light-blue multiply over the Rogue's green atlas comes out teal. It is the look-test method (default 10 of the 1b plan), but the result doesn't read as "water" on screen. Options: a stronger tint, a tint on the cloth only (needs a texture or mask pass), or the paid KayKit model (parked). Not changed: your call.
 - **Play it by hand** (`npm run dev`, one tab per hero) and check how it feels: the dash and blink, the zone readability, and the animation speeds.
+
+## 2026-11-10: After slice 1b.2 (JCCJ)
+
+- **Docker check passed** (`bash tools/docker-check.sh`, all checks), after the 1b.2 commit. Its scripted run is `logs/2026-11-09T19-19-09.902Z_CGVN.jsonl`, with the container's file permissions.
+- **JCCJ's `npm run dev` game** (`QKLC`): J + 3 bots, all Ember, 5 min 42 s, wave 9, 381 kills, wiped.
+  - Server tick p95 at most 0.65 ms + patch 0.95 ms; at most 17.6 kB/s per client.
+  - The client ran at about 60 fps on High, except 80–100 s (18 and 4 fps, frames up to about 10 s) and 320–340 s (1% low 5.8 fps). No client reports 230–310 s (tab most likely in the background).
+- **Open: the lobby showed no hero cards in JCCJ's game.** The built client (00:14) and the dev source both contain them, and Playwright sees them. Cause unknown; the leading guess is a browser tab still running a pre-1b.2 page. To check with a fresh tab and a hard reload, noting which address was used.
+
+## 2026-11-10: Pause added as slice 1b.3 (JCCJ)
+
+- **New feature, not in BRIEF.md: pause the run.** It becomes slice **1b.3**, built in its own session (plan mode, tests first) right after 1b.2 and before stage 1c, so it's ready for the 1c game-night playtest.
+- **Deviation from the brief's rule** ("adding to Phase 1 means removing something of equal size"): JCCJ judged pause too small to need a trade. **Nothing leaves Phase 1.**
+- **Decisions:**
+  1. **Who:** any player can pause, with **Esc**. Only the **host page** can resume, with a Resume button checked on the server like Start and Back to lobby.
+  2. **What freezes: everything.**
+     - the simulation (enemies, bolts, zones);
+     - cooldowns, the ring drain and regeneration;
+     - bleed-out and revive timers, and the wave and break timers.
+     
+     Inputs are ignored while paused. The match log records pause and resume, and the run time excludes the pause.
+  3. **Esc in fullscreen** also leaves fullscreen (the browser's own rule). Accepted.
+- **Still to settle in the 1b.3 planning session:**
+  - what players and the host page show while paused (banner text, who paused);
+  - a limit on pause spam (one player pausing again and again);
+  - pausing during a wave break, or while the pausing player is downed or dead;
+  - what bots do;
+  - the perf reporter (count a pause like a hidden tab?) and the `perf` lines during a pause;
+  - whether a player leaving or being kicked while paused changes anything.
+- **Before 1b.3:** settle the "no hero cards in the lobby" report from JCCJ's 2026-11-10 game (see the entry above). If it's a real bug, it gets a regression test first, as the brief requires.
