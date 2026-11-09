@@ -1,5 +1,6 @@
 import { HEROES, heroKit, type HeroId } from '@crossfire/shared/heroes';
 import {
+  assistRange,
   blinkTarget,
   canCast,
   clampCast,
@@ -395,7 +396,7 @@ export class World {
           h.z,
           inp.aimX,
           inp.aimZ,
-          bolt.range,
+          assistRange(h.heroId, this.t),
           this.t.aim.assistCone,
           this.enemies.items,
           this.enemies.count,
@@ -434,7 +435,7 @@ export class World {
           h.z,
           inp.aimX,
           inp.aimZ,
-          melee.reach + m.assistExtra,
+          assistRange(h.heroId, this.t),
           this.t.aim.assistCone,
           this.enemies.items,
           this.enemies.count,

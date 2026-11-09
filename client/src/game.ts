@@ -1,4 +1,14 @@
 import * as THREE from 'three';
+import {
+  ELEMENT_COLOR,
+  elementAt,
+  HEROES,
+  heroKit,
+  isHeroId,
+  type Element,
+  type HeroId,
+} from '@crossfire/shared/heroes';
+import { assistRange, clampCast } from '@crossfire/shared/rules/abilities';
 import { assistTarget, type AimTarget } from '@crossfire/shared/rules/aim';
 import { TUNING } from '@crossfire/shared/tuning';
 import { MSG, type HeroStatus, type InputMessage } from '@crossfire/shared/types';
@@ -7,18 +17,21 @@ import { FpsOverlay, fpsEnabled } from './hud/fps';
 import { el } from './dom';
 import { Hud, type HudView } from './hud/hud';
 import { clampToMap, rayToGround } from './input/aim';
+import { debugEnabled } from './input/cast';
 import { Controls } from './input/controls';
 import { InputSeq } from './input/keys';
 import type { GameRoom } from './net/connection';
 import { SnapshotBuffer, type Sample } from './net/interpolation';
 import { PerfReporter } from './net/perfReport';
 import { Predictor } from './net/prediction';
-import type { EnemyStateName, RoomState } from './net/state';
+import type { EnemyStateName, HeroView, RoomState } from './net/state';
 import type { Models } from './render/assets';
-import { BoltSprite, Reticle } from './render/effects';
+import { BoltSprite, Pulses, Reticle, ZoneDisc, ZonePreview } from './render/effects';
+import { zoneOpacity } from './render/fx';
 import { Stage } from './render/scene';
+import { zoneTexture } from './render/textures';
 import type { Tier } from './render/tiers';
-import { EnemyUnit, HeroUnit } from './render/units';
+import { EnemyUnit, HeroUnit, type HeroActName } from './render/units';
 import { ViewRegistry } from './render/views';
 
 const TICK = 1 / TUNING.tickHz;
@@ -29,6 +42,11 @@ interface HeroEntry {
   buf: SnapshotBuffer;
   status: HeroStatus;
   reviveProgress: number;
+  lastActSeq: number;
+  /** Last synced position (where a Flame step started). */
+  lastX: number;
+  lastZ: number;
+  dashing: boolean;
 }
 
 interface EnemyEntry {
@@ -37,6 +55,7 @@ interface EnemyEntry {
   hp: number;
   state: EnemyStateName;
   scale: number;
+  fx: number;
   /** Position drawn this frame (for aim assist). */
   x: number;
   z: number;
@@ -49,6 +68,20 @@ interface BoltEntry {
   dirZ: number;
 }
 
+interface ZoneEntry {
+  disc: ZoneDisc;
+  x: number;
+  z: number;
+  el: Element;
+  /** Seconds left at the last patch, and when that patch arrived (ms). */
+  remaining: number;
+  at: number;
+}
+
+function isAct(a: string): a is HeroActName {
+  return a === 'attack' || a === 'q' || a === 'e';
+}
+
 /**
  * The game view for one player: renders the synced state, predicts the player's own hero and
  * sends its input once per server tick. Lives for the whole connection; runs are reset in place.
@@ -57,14 +90,18 @@ export class Game {
   readonly root: HTMLElement;
   readonly canvas: HTMLCanvasElement;
   private readonly stage: Stage;
-  private readonly hud = new Hud();
+  private readonly debug = debugEnabled(location.search);
+  private readonly hud = new Hud(this.debug);
   private readonly controls: Controls;
   private readonly predictor = new Predictor();
   private readonly seq = new InputSeq();
   private readonly reticle = new Reticle();
+  private readonly preview: ZonePreview;
+  private readonly pulses = new Pulses();
   private readonly heroes = new Map<string, HeroEntry>();
   private readonly enemies: ViewRegistry<EnemyEntry>;
   private readonly bolts: ViewRegistry<BoltEntry>;
+  private readonly zones: ViewRegistry<ZoneEntry>;
   private readonly seenNow = new Set<string>();
   private readonly seenBefore = new Set<string>();
   private readonly aimTargets: (AimTarget & { e: EnemyEntry | null })[] = [];
@@ -76,7 +113,6 @@ export class Game {
     aimZ: 0,
     attack: false,
     revive: false,
-    // Q and E controls arrive in slice 1b.2; until then the client never casts.
     cast: 'none',
     qHeld: false,
   };
@@ -84,6 +120,7 @@ export class Game {
   private readonly aim = { x: 0, z: 4 };
   private readonly sample: Sample = { x: 0, z: 0, facing: 0 };
   private readonly drawPos = { x: 0, z: 0 };
+  private readonly castPos = { x: 0, z: 0 };
   private readonly ray = new THREE.Raycaster();
   private readonly ndc = new THREE.Vector2();
   private readonly hudView: HudView = {
@@ -99,8 +136,13 @@ export class Game {
     canRevive: '',
     revivingFrac: 0,
     standing: 0,
+    hero: 'ember',
+    qCd: 0,
+    eCd: 0,
+    qHeld: false,
   };
   private myStatus: HeroStatus | null = null;
+  private myHero: HeroId = 'ember';
   private sendAcc = 0;
   private sinceSend = 0;
   private lastFrame = 0;
@@ -121,13 +163,17 @@ export class Game {
     this.root = el('div', { className: 'game' }, this.canvas, this.hud.root);
     if (this.fps) this.root.append(this.fps.root);
     this.stage = new Stage(this.canvas);
-    this.stage.scene.add(this.reticle.group);
-    this.controls = new Controls(this.canvas);
+    const zoneTex = zoneTexture();
+    this.preview = new ZonePreview(zoneTex);
+    this.stage.scene.add(this.reticle.group, this.preview.mesh, this.pulses.group);
+    this.controls = new Controls(this.canvas, this.debug);
+    // The server also needs CROSSFIRE_DEBUG=1; otherwise it ignores this.
+    this.controls.onDebugHero = (hero) => this.room.send(MSG.debugHero, { hero });
 
     const enemyMax = TUNING.waves.enemyCap + TUNING.client.deathViewSlack;
     this.enemies = new ViewRegistry<EnemyEntry>(
       () => {
-        const unit = new EnemyUnit(models.minion);
+        const unit = new EnemyUnit(models.minion, this.stage.glow);
         unit.setShadows(this.enemyShadows);
         this.stage.scene.add(unit.holder);
         return {
@@ -136,6 +182,7 @@ export class Game {
           hp: 0,
           state: 'spawning',
           scale: 1,
+          fx: 0,
           x: 0,
           z: 0,
         };
@@ -164,6 +211,23 @@ export class Game {
         },
         onHide: (v) => {
           v.sprite.group.visible = false;
+        },
+      },
+    );
+    let zoneLayer = 0;
+    this.zones = new ViewRegistry<ZoneEntry>(
+      () => {
+        const disc = new ZoneDisc(zoneTex, zoneLayer++);
+        this.stage.scene.add(disc.mesh);
+        return { disc, x: 0, z: 0, el: 'fire', remaining: 0, at: 0 };
+      },
+      {
+        max: TUNING.zones.cap,
+        onShow: (v) => {
+          v.disc.mesh.visible = true;
+        },
+        onHide: (v) => {
+          v.disc.mesh.visible = false;
         },
       },
     );
@@ -219,6 +283,9 @@ export class Game {
   resetRun(): void {
     this.enemies.releaseAll();
     this.bolts.releaseAll();
+    this.zones.releaseAll();
+    this.pulses.clear();
+    this.preview.hide();
     for (const [id, h] of this.heroes) {
       this.stage.scene.remove(h.unit.holder);
       this.heroes.delete(id);
@@ -237,30 +304,52 @@ export class Game {
 
   // ---- network ----
 
+  private newHeroEntry(h: HeroView, id: string, myId: string): HeroEntry {
+    const hero = isHeroId(h.hero) ? h.hero : 'ember';
+    const unit = new HeroUnit(this.models.heroes[hero], hero, this.stage.glow);
+    unit.setMine(id === myId);
+    unit.setShadows(this.stage.shadows);
+    this.stage.scene.add(unit.holder);
+    return {
+      unit,
+      buf: new SnapshotBuffer(TUNING.client.snapshotBuffer),
+      status: h.status,
+      reviveProgress: 0,
+      lastActSeq: h.actSeq,
+      lastX: h.x,
+      lastZ: h.z,
+      dashing: false,
+    };
+  }
+
   private onPatch(s: RoomState): void {
     const now = performance.now();
     const myId = this.room.sessionId;
 
     s.heroes.forEach((h, id) => {
       let e = this.heroes.get(id);
+      if (e && e.unit.hero !== h.hero) {
+        // Debug hero switch: a new body for the new hero.
+        this.stage.scene.remove(e.unit.holder);
+        e = undefined;
+      }
       if (!e) {
-        const unit = new HeroUnit(this.models.hero);
-        unit.setMine(id === myId);
-        unit.setShadows(this.stage.shadows);
-        this.stage.scene.add(unit.holder);
-        e = {
-          unit,
-          buf: new SnapshotBuffer(TUNING.client.snapshotBuffer),
-          status: h.status,
-          reviveProgress: 0,
-        };
+        e = this.newHeroEntry(h, id, myId);
         this.heroes.set(id, e);
       }
+      if (h.actSeq !== e.lastActSeq) {
+        e.lastActSeq = h.actSeq;
+        if (isAct(h.act)) this.onAct(e, h, id === myId);
+      }
       e.buf.push(now, h.x, h.z, h.facing);
+      e.lastX = h.x;
+      e.lastZ = h.z;
       e.status = h.status;
+      e.dashing = h.dashing;
+      e.unit.setStoneSkin(h.stoneSkin);
       const need = h.status === 'dead' ? TUNING.revive.deadReviveSec : TUNING.revive.downedReviveSec;
       e.reviveProgress = h.status === 'standing' ? 0 : Math.min(1, h.reviveProgress / need);
-      if (id === myId) this.reconcileMe(h.x, h.z, h.lastSeq, h.status);
+      if (id === myId) this.reconcileMe(h);
     });
     for (const [id, e] of this.heroes) {
       if (!s.heroes.get(id)) {
@@ -279,6 +368,7 @@ export class Game {
       v.hp = en.hp;
       v.state = en.state;
       v.scale = en.scale;
+      v.fx = en.fx;
     });
     for (const id of this.seenBefore) {
       if (this.seenNow.has(id)) continue;
@@ -288,7 +378,6 @@ export class Game {
     this.seenBefore.clear();
     for (const id of this.seenNow) this.seenBefore.add(id);
 
-    // Bolts: a new bolt next to a hero plays that hero's cast animation.
     s.bolts.forEach((b, id) => {
       const known = this.bolts.get(id);
       const v = known ?? this.bolts.acquire(id);
@@ -296,7 +385,7 @@ export class Game {
       if (!known) {
         v.dirX = b.dirX;
         v.dirZ = b.dirZ;
-        this.castFrom(s, b.x, b.z);
+        v.sprite.setElement(elementAt(b.element));
       }
       v.buf.push(now, b.x, b.z, 0);
     });
@@ -304,11 +393,26 @@ export class Game {
       if (!s.bolts.get(id)) this.bolts.release(id);
     });
 
+    // Zones do not move: no interpolation, only their time left.
+    s.zones.forEach((zn, id) => {
+      const v = this.zones.acquire(id);
+      if (!v) return;
+      v.x = zn.x;
+      v.z = zn.z;
+      v.el = zn.element;
+      v.remaining = zn.remaining;
+      v.at = now;
+    });
+    this.zones.forEachActive((_v, id) => {
+      if (!s.zones.get(id)) this.zones.release(id);
+    });
+
     const dbg = debugView();
     dbg.phase = s.phase;
     this.phase = s.phase;
     const me = s.heroes.get(myId);
-    dbg.me = me ? { x: me.x, z: me.z, status: me.status } : null;
+    dbg.me = me ? { x: me.x, z: me.z, status: me.status, hero: me.hero, eCd: me.eCd } : null;
+    dbg.zones = s.zones.size;
 
     const v = this.hudView;
     v.wave = s.wave;
@@ -319,6 +423,9 @@ export class Game {
       v.maxHp = me.maxHp;
       v.status = me.status;
       v.bleedOut = me.bleedOut;
+      v.hero = this.myHero;
+      v.qCd = me.qCd;
+      v.eCd = me.eCd;
     }
     let standing = 0;
     s.heroes.forEach((h) => {
@@ -328,17 +435,21 @@ export class Game {
     this.findReviveTarget(s, myId);
   }
 
-  private castFrom(s: RoomState, x: number, z: number): void {
-    let best: HeroEntry | undefined;
-    let bestD = 1.5 * 1.5;
-    s.heroes.forEach((h, id) => {
-      const d = (h.x - x) ** 2 + (h.z - z) ** 2;
-      if (d < bestD) {
-        bestD = d;
-        best = this.heroes.get(id);
-      }
-    });
-    best?.unit.shoot();
+  /** Something a hero just did: its animation, and the placeholder effect for an E. */
+  private onAct(e: HeroEntry, h: HeroView, mine: boolean): void {
+    const act = h.act as HeroActName;
+    e.unit.act(act);
+    if (act !== 'e') return;
+    if (h.hero === 'ember') {
+      // Flame step: puffs at both ends; another player's hero jumps instead of sliding.
+      this.pulses.fire(e.lastX, e.lastZ, ELEMENT_COLOR.fire, 0.3, 1.4, 0.45);
+      this.pulses.fire(h.x, h.z, ELEMENT_COLOR.fire, 0.3, 1.6, 0.5);
+      if (!mine) e.buf.clear();
+    } else if (h.hero === 'tide') {
+      this.pulses.fire(h.x, h.z, ELEMENT_COLOR.water, 0.5, heroKit('tide').utility.radius, 0.7);
+    } else if (h.hero === 'bastion') {
+      this.pulses.fire(h.x, h.z, ELEMENT_COLOR.earth, 0.5, heroKit('bastion').utility.tauntRadius, 0.6);
+    }
   }
 
   /** The body I would revive if I hold F: the nearest downed or dead hero within reach. */
@@ -361,21 +472,27 @@ export class Game {
     });
   }
 
-  private reconcileMe(x: number, z: number, lastSeq: number, status: HeroStatus): void {
-    if (status !== 'standing') {
-      this.predictor.reset(x, z);
+  private reconcileMe(h: HeroView): void {
+    if (isHeroId(h.hero) && h.hero !== this.myHero) {
+      this.myHero = h.hero;
+      this.predictor.setHero(h.hero);
+    }
+    if (h.status !== 'standing') {
+      this.predictor.reset(h.x, h.z);
     } else if (this.myStatus !== 'standing') {
       // Run start or just revived: start predicting from the server position.
-      this.predictor.reset(x, z);
-      this.stage.snapCamera(x, z);
+      this.predictor.reset(h.x, h.z);
+      this.predictor.reconcile(h.x, h.z, h.lastSeq, h.eCd);
+      this.stage.snapCamera(h.x, h.z);
     } else {
-      this.predictor.reconcile(x, z, lastSeq);
+      this.predictor.reconcile(h.x, h.z, h.lastSeq, h.eCd);
     }
-    this.myStatus = status;
+    this.myStatus = h.status;
   }
 
   private sendInput(): void {
     const inp = this.input;
+    const standing = this.myStatus === 'standing';
     this.controls.keys.move(this.move);
     inp.seq = this.seq.next();
     inp.moveX = this.move.x;
@@ -384,8 +501,10 @@ export class Game {
     inp.aimZ = this.aim.z;
     inp.attack = this.controls.attackHeld;
     inp.revive = this.controls.reviveHeld;
+    inp.qHeld = standing && this.controls.cast.qHeld;
+    inp.cast = this.controls.cast.take(standing, this.predictor.eReady());
     this.room.send(MSG.input, inp);
-    if (this.myStatus === 'standing') this.predictor.applyInput(inp.seq, inp.moveX, inp.moveZ);
+    if (standing) this.predictor.applyInput(inp.seq, inp.moveX, inp.moveZ, inp.cast, inp.aimX, inp.aimZ);
     this.sinceSend = 0;
   }
 
@@ -430,10 +549,12 @@ export class Game {
         this.predictor.decay(dt);
         this.predictor.renderPos(this.drawPos, this.sinceSend, this.move.x, this.move.z);
         this.predictor.setFacingFromAim(this.aim.x, this.aim.z);
+        h.unit.setDashing(this.predictor.dashing || h.dashing);
         h.unit.update(dt, this.drawPos.x, this.drawPos.z, this.predictor.facing, h.status, h.reviveProgress);
         meX = this.drawPos.x;
         meZ = this.drawPos.z;
       } else if (h.buf.sample(id === myId ? Infinity : renderTime, this.sample)) {
+        h.unit.setDashing(h.dashing);
         h.unit.update(dt, this.sample.x, this.sample.z, this.sample.facing, h.status, h.reviveProgress);
         if (id === myId) {
           meX = this.sample.x;
@@ -447,7 +568,7 @@ export class Game {
       if (!e.buf.sample(renderTime, this.sample)) return;
       e.x = this.sample.x;
       e.z = this.sample.z;
-      e.unit.update(dt, e.x, e.z, this.sample.facing, e.state, e.hp, e.scale);
+      e.unit.update(dt, e.x, e.z, this.sample.facing, e.state, e.hp, e.scale, e.fx);
       const a = this.aimTargets[n++];
       if (a) {
         a.x = e.x;
@@ -463,11 +584,17 @@ export class Game {
       if (b.buf.sample(renderTime, this.sample)) b.sprite.place(this.sample.x, this.sample.z, b.dirX, b.dirZ);
     });
 
+    this.zones.forEachActive((z) => {
+      const left = z.remaining - (now - z.at) / 1000;
+      z.disc.place(z.x, z.z, z.el, zoneOpacity(left, TUNING.zones.durationSec));
+    });
+    this.pulses.update(dt);
+
     // Reticle, aim line and the aim-assist target (same rule as the server).
     const standing = this.myStatus === 'standing';
     this.reticle.setVisible(standing);
     if (standing) {
-      const range = TUNING.heroes.ember.bolt.range;
+      const range = assistRange(this.myHero);
       this.reticle.update(meX, meZ, this.aim.x, this.aim.z, range);
       const i = TUNING.aim.assistOn
         ? assistTarget(meX, meZ, this.aim.x, this.aim.z, range, TUNING.aim.assistCone, this.aimTargets, n)
@@ -476,9 +603,23 @@ export class Game {
       this.reticle.setTarget(!!tgt, tgt?.x, tgt?.z);
     }
 
+    // Q preview: where the zone would land, dim while Q cools down.
+    const qHeld = standing && this.controls.cast.qHeld;
+    if (qHeld) {
+      clampCast(meX, meZ, this.aim.x, this.aim.z, TUNING.zones.castRange, this.castPos);
+      this.preview.show(
+        this.castPos.x,
+        this.castPos.z,
+        HEROES[this.myHero].element,
+        this.hudView.qCd <= 1e-9,
+      );
+    } else this.preview.hide();
+    debugView().qPreview = this.preview.visible;
+
     if (this.myStatus) this.stage.follow(meX, meZ, dt);
     const v = this.hudView;
     v.outsideRing = Math.hypot(meX, meZ) > TUNING.ring.radius;
+    v.qHeld = qHeld;
     this.hud.update(v);
     this.stage.render(dt);
   }

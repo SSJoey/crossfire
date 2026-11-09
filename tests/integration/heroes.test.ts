@@ -1,6 +1,7 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import type { ColyseusTestServer } from '@colyseus/testing';
 import type { Room as ClientRoom } from '@colyseus/sdk';
+import { elementIndex } from '@crossfire/shared/heroes';
 import { TUNING } from '@crossfire/shared/tuning';
 import { MSG } from '@crossfire/shared/types';
 import { createApp } from '../../server/src/app';
@@ -140,5 +141,47 @@ describe('debug hero switch', () => {
     expect(HoldRoom.debugHeroSwitch).toBe(false);
     createApp({ debugHeroSwitch: true });
     expect(HoldRoom.debugHeroSwitch).toBe(true);
+  });
+});
+
+describe('bolt element in the synced state (1b.2)', () => {
+  it('a Tide bolt syncs water and an Ember bolt fire', async () => {
+    const { room, players } = await pickAndStart([
+      ['A', 'tide'],
+      ['B', 'ember'],
+    ]);
+    const [tide, ember] = players as [ClientRoom, ClientRoom];
+    const heroes = room.world.heroes;
+    // Spread them out so each bolt is clearly one hero's.
+    heroes.get(tide.sessionId)!.x = -8;
+    heroes.get(ember.sessionId)!.x = 8;
+    let seq = 0;
+    const fire = () => {
+      seq++;
+      tide.send(MSG.input, input(seq, { attack: true, aimX: -8, aimZ: 10 }));
+      ember.send(MSG.input, input(seq, { attack: true, aimX: 8, aimZ: 10 }));
+    };
+    const byElement = () => {
+      const seen = { left: new Set<number>(), right: new Set<number>() };
+      room.state.bolts.forEach((b) => (b.x < 0 ? seen.left : seen.right).add(b.element));
+      return seen;
+    };
+    // One input per tick, like a real client (the rate limit is 60/s).
+    const timer = setInterval(fire, 1000 / TUNING.tickHz);
+    try {
+      await until(
+        () => {
+          const s = byElement();
+          return s.left.size > 0 && s.right.size > 0;
+        },
+        3000,
+        'bolts from both heroes',
+      );
+    } finally {
+      clearInterval(timer);
+    }
+    const s = byElement();
+    expect([...s.left]).toEqual([elementIndex('water')]);
+    expect([...s.right]).toEqual([elementIndex('fire')]);
   });
 });

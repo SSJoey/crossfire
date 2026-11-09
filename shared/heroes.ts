@@ -6,7 +6,26 @@ import { TUNING, type Tuning } from './tuning';
  */
 export const HERO_IDS = ['ember', 'bastion', 'tide', 'gale'] as const;
 export type HeroId = (typeof HERO_IDS)[number];
-export type Element = 'fire' | 'earth' | 'water' | 'air';
+export const ELEMENT_IDS = ['fire', 'earth', 'water', 'air'] as const;
+export type Element = (typeof ELEMENT_IDS)[number];
+
+/** Element colours for auras, bolts and zones (look test). Art, not tuning. */
+export const ELEMENT_COLOR: Readonly<Record<Element, number>> = {
+  fire: 0xff6a2b,
+  earth: 0xc9934a,
+  water: 0x3fa7ff,
+  air: 0xbdf5ff,
+};
+
+/** An element as the byte synced in `BoltState.element`. */
+export function elementIndex(el: Element): number {
+  return ELEMENT_IDS.indexOf(el);
+}
+
+/** The element of a synced byte (an unknown byte reads as fire). */
+export function elementAt(i: number): Element {
+  return ELEMENT_IDS[i] ?? 'fire';
+}
 export type AttackStyle = 'ranged' | 'melee';
 
 export interface HeroDef {

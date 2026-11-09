@@ -304,6 +304,67 @@ select {
 .slot span {
   font-size: 12px;
   line-height: 1.2;
+  position: relative;
+}
+.slots {
+  display: flex;
+  gap: 8px;
+}
+.slot {
+  overflow: hidden;
+}
+.slot .cd {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: calc(var(--p, 0) * 100%);
+  background: rgba(0, 0, 0, 0.62);
+  border-top: 1px solid rgba(242, 193, 78, 0.5);
+}
+.slot.armed {
+  border-color: var(--gold);
+  background: rgba(242, 193, 78, 0.14);
+}
+.heroid .passive {
+  font-size: 12px;
+  color: var(--muted);
+}
+.heroes {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 8px;
+}
+.hero-card {
+  display: grid;
+  gap: 4px;
+  text-align: left;
+  padding: 10px 12px;
+  font: 400 13px/1.3 var(--body);
+  letter-spacing: 0;
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-left: 4px solid var(--el, var(--gold));
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.04);
+  cursor: pointer;
+}
+.hero-card .hn {
+  font: 500 24px/1 var(--display);
+  color: var(--text);
+}
+.hero-card .hs {
+  color: var(--muted);
+}
+.hero-card[aria-pressed='true'] {
+  border-color: var(--gold);
+  border-left-color: var(--el, var(--gold));
+  background: rgba(242, 193, 78, 0.12);
+  box-shadow: 0 0 0 1px var(--gold);
+}
+.players .hero {
+  color: var(--muted);
+  font-size: 13px;
 }
 .banner {
   top: 62px;
@@ -382,6 +443,12 @@ select {
 .end-stats .v {
   font: 500 52px/1 var(--display);
   font-variant-numeric: tabular-nums;
+}
+/* The ability bar (three slots) and the help panel meet below about 1,100 px: lift the help. */
+@media (max-width: 1180px) {
+  .help {
+    bottom: 104px;
+  }
 }
 @media (max-width: 760px) {
   .help {

@@ -1,7 +1,8 @@
-import { HEROES } from '@crossfire/shared/heroes';
+import { heroKit, type HeroId } from '@crossfire/shared/heroes';
 import { TUNING } from '@crossfire/shared/tuning';
 import type { HeroStatus } from '@crossfire/shared/types';
 import { el, setText, show } from '../dom';
+import { cdFrac, heroText } from './abilities';
 
 export interface HudView {
   wave: number;
@@ -20,9 +21,37 @@ export interface HudView {
   revivingFrac: number;
   /** Number of standing players (for the full-death revive hint). */
   standing: number;
+  /** My hero and its Q/E cooldowns left (s). */
+  hero: HeroId;
+  qCd: number;
+  eCd: number;
+  /** Q held: the zone preview is up. */
+  qHeld: boolean;
 }
 
-const ember = HEROES.ember;
+/** One ability slot: key, name and a cooldown shade that shrinks as it comes back. */
+class Slot {
+  readonly root: HTMLElement;
+  private readonly label = el('span');
+  private readonly shade = el('i', { className: 'cd' });
+  private lastP = -1;
+
+  constructor(id: string, key: string) {
+    this.root = el('div', { id, className: 'slot' }, el('b', { text: key }), this.label, this.shade);
+  }
+
+  setLabel(text: string): void {
+    setText(this.label, text);
+  }
+
+  setCooldown(p: number): void {
+    const q = Math.round(p * 100) / 100;
+    if (q === this.lastP) return;
+    this.lastP = q;
+    this.shade.style.setProperty('--p', String(q));
+    this.root.dataset.cooling = q > 0 ? '1' : '0';
+  }
+}
 
 /** The in-game HUD. All text goes through textContent. */
 export class Hud {
@@ -44,8 +73,16 @@ export class Hud {
     this.statusBar,
   );
   private readonly vig = el('div', { id: 'vig' });
+  private readonly heroName = el('span');
+  private readonly heroSub = el('small');
+  private readonly passive = el('div', { id: 'hud-passive', className: 'passive' });
+  private readonly basic = new Slot('hud-slot-basic', 'Click');
+  private readonly q = new Slot('hud-slot-q', 'Q');
+  private readonly e = new Slot('hud-slot-e', 'E');
+  private shownHero: HeroId | null = null;
 
-  constructor() {
+  /** `debug`: show the 1–4 hero switch in the help panel (?debug=1). */
+  constructor(debug = false) {
     const help = el(
       'div',
       { className: 'hud panel help' },
@@ -59,9 +96,15 @@ export class Hud {
         ' move, mouse aims',
       ),
       el('div', {}, el('kbd', { text: 'Click' }), ' attack (hold to repeat)'),
+      el('div', {}, el('kbd', { text: 'Q' }), ' hold to aim your zone, release to cast'),
+      el('div', {}, el('kbd', { text: 'E' }), ' utility'),
       el('div', {}, el('kbd', { text: 'F' }), ' hold near a fallen teammate to revive'),
       el('div', { text: 'Stay inside the orange ring' }),
     );
+    if (debug)
+      help.append(
+        el('div', {}, el('kbd', { text: '1' }), '–', el('kbd', { text: '4' }), ' switch hero (debug)'),
+      );
     this.root = el(
       'div',
       { className: 'hud-layer' },
@@ -78,11 +121,12 @@ export class Hud {
         el(
           'div',
           { className: 'heroid' },
-          el('div', { className: 'nm' }, ember.name, el('small', { text: 'Fire, ranged' })),
+          el('div', { id: 'hud-hero-name', className: 'nm' }, this.heroName, this.heroSub),
           el('div', { className: 'hp' }, this.hpFill),
           this.hpText,
+          this.passive,
         ),
-        el('div', { className: 'slot' }, el('b', { text: 'Click' }), el('span', { text: ember.basicAttack })),
+        el('div', { className: 'slots' }, this.basic.root, this.q.root, this.e.root),
       ),
       this.banner,
       this.status,
@@ -92,7 +136,22 @@ export class Hud {
     this.status.hidden = true;
   }
 
+  private showHero(id: HeroId): void {
+    this.shownHero = id;
+    const t = heroText(id);
+    setText(this.heroName, t.name);
+    setText(this.heroSub, t.sub);
+    setText(this.passive, `Passive: ${t.passive}`);
+    this.basic.setLabel(t.basic);
+    this.q.setLabel(t.q);
+    this.e.setLabel(t.e);
+  }
+
   update(v: HudView): void {
+    if (v.hero !== this.shownHero) this.showHero(v.hero);
+    this.q.setCooldown(cdFrac(v.qCd, TUNING.zones.cooldownSec));
+    this.e.setCooldown(cdFrac(v.eCd, heroKit(v.hero).utility.cooldownSec));
+    this.q.root.classList.toggle('armed', v.qHeld && v.status === 'standing');
     setText(this.wave, String(v.wave));
     setText(this.horde, String(v.horde));
     const frac = v.maxHp > 0 ? Math.max(0, Math.min(1, v.hp / v.maxHp)) : 0;

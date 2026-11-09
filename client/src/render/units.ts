@@ -1,10 +1,12 @@
 import * as THREE from 'three';
 import { clone as cloneSkinned } from 'three/addons/utils/SkeletonUtils.js';
+import { ELEMENT_COLOR, HEROES, heroKit, type HeroId } from '@crossfire/shared/heroes';
 import { TUNING } from '@crossfire/shared/tuning';
 import type { HeroStatus } from '@crossfire/shared/types';
 import type { EnemyStateName } from '../net/state';
 import type { ModelSet } from './assets';
-import { HERO_CLIP, SKELETON_CLIP } from './clips';
+import { HERO_ANIM, HERO_CLIP, SKELETON_CLIP } from './clips';
+import { statusGlow } from './fx';
 
 interface PlayOptions {
   once?: boolean;
@@ -117,10 +119,33 @@ const youMat = new THREE.MeshBasicMaterial({
 });
 
 const MOVING_SPEED = 0.6;
+const TRAIL = 3;
 
-/** A hero: model, animation from its synced status, and its ground markers. */
+const auraGeo = new THREE.CircleGeometry(0.75, 32);
+const shellGeo = new THREE.CylinderGeometry(0.78, 0.78, 1.9, 20, 1, true);
+
+function glowMat(glow: THREE.Texture, color: number, opacity: number): THREE.MeshBasicMaterial {
+  return new THREE.MeshBasicMaterial({
+    color,
+    map: glow,
+    transparent: true,
+    opacity,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false,
+    toneMapped: false,
+  });
+}
+
+/** What the hero last did, as synced in `HeroState.act`. */
+export type HeroActName = 'attack' | 'q' | 'e';
+
+/**
+ * A hero: model, animation from its synced status and actions, its element aura and ground
+ * markers, and the placeholder E visuals (stone shell, dash trail).
+ */
 export class HeroUnit {
   readonly holder: THREE.Group;
+  readonly hero: HeroId;
   private readonly anim: Animator;
   private readonly model: THREE.Object3D;
   private readonly youRing: THREE.Mesh;
@@ -133,8 +158,16 @@ export class HeroUnit {
   private speed = 0;
   private time = 0;
   private hasPos = false;
+  private readonly aura: THREE.Mesh;
+  private readonly shell: THREE.Mesh;
+  private readonly shellMat: THREE.MeshBasicMaterial;
+  private readonly trail: THREE.Sprite[] = [];
+  private stoneSkin = false;
+  private dashing = false;
+  private readonly moveDir = new THREE.Vector2(0, 1);
 
-  constructor(set: ModelSet) {
+  constructor(set: ModelSet, hero: HeroId, glow: THREE.Texture) {
+    this.hero = hero;
     const u = makeUnit(set);
     this.holder = u.holder;
     this.model = u.model;
@@ -160,9 +193,72 @@ export class HeroUnit {
     this.arc = flatRing(1.1, 1.3, this.arcMat, 64);
     this.arc.position.y = 0.05;
     this.arc.visible = false;
+    const color = ELEMENT_COLOR[HEROES[hero].element];
+    this.aura = new THREE.Mesh(auraGeo, glowMat(glow, color, 0.75));
+    this.aura.rotation.x = -Math.PI / 2;
+    this.aura.position.y = 0.035;
+    // Stone skin: a faint earth-coloured shell around Bastion.
+    this.shellMat = new THREE.MeshBasicMaterial({
+      color: ELEMENT_COLOR.earth,
+      transparent: true,
+      opacity: 0.3,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+      toneMapped: false,
+    });
+    this.shell = new THREE.Mesh(shellGeo, this.shellMat);
+    this.shell.position.y = 0.95;
+    this.shell.visible = false;
+    // Gust dash: a few air-coloured glows behind the hero.
+    for (let i = 0; i < TRAIL; i++) {
+      const sp = new THREE.Sprite(
+        new THREE.SpriteMaterial({
+          map: glow,
+          color: ELEMENT_COLOR.air,
+          blending: THREE.AdditiveBlending,
+          depthWrite: false,
+          toneMapped: false,
+          opacity: 0.7 - i * 0.2,
+        }),
+      );
+      sp.scale.setScalar(1.3 - i * 0.25);
+      sp.visible = false;
+      this.trail.push(sp);
+    }
     // Markers live outside the rotating model so they stay flat and centred.
-    this.holder.add(this.youRing, this.downRing, this.arc);
+    this.holder.add(this.aura, this.youRing, this.downRing, this.arc, this.shell, ...this.trail);
     this.anim.play(HERO_CLIP.idle, { fade: 0 });
+  }
+
+  /** Stone skin is up (synced). */
+  setStoneSkin(on: boolean): void {
+    this.stoneSkin = on;
+  }
+
+  /** A Gust dash is under way (synced, or predicted for my own hero). */
+  setDashing(on: boolean): void {
+    this.dashing = on;
+  }
+
+  /** Plays the clip for something the hero just did (a new `act` from the server). */
+  act(kind: HeroActName): void {
+    if (this.status !== 'standing') return;
+    const a = HERO_ANIM[this.hero];
+    if (kind === 'attack') {
+      const kit = heroKit(this.hero);
+      const interval = 'bolt' in kit ? kit.bolt.intervalSec : kit.melee.intervalSec;
+      const base = 'bolt' in kit ? 2 : 1.8;
+      const d = this.anim.duration(a.attack);
+      this.anim.play(a.attack, { once: true, fade: 0.08, timeScale: Math.max(base, d / interval) });
+    } else if (kind === 'q') {
+      this.anim.play(a.q, { once: true, fade: 0.08, timeScale: 1.6 });
+    } else if (a.e) {
+      // The dash clip is squeezed into the dash itself.
+      const d = this.anim.duration(a.e);
+      const ts = this.hero === 'gale' ? Math.max(1, d / heroKit('gale').utility.durationSec) : 1.6;
+      this.anim.play(a.e, { once: true, fade: 0.05, timeScale: ts });
+    }
   }
 
   setMine(mine: boolean): void {
@@ -173,22 +269,29 @@ export class HeroUnit {
     setCastShadow(this.model, on);
   }
 
-  /** Plays the cast animation (a bolt from this hero just appeared). */
-  shoot(): void {
-    if (this.status !== 'standing') return;
-    this.anim.play(HERO_CLIP.shoot, { once: true, fade: 0.08, timeScale: 2 });
-  }
-
   update(dt: number, x: number, z: number, facing: number, status: HeroStatus, reviveProgress: number): void {
     this.time += dt;
     if (this.hasPos && dt > 0) {
       const v = Math.hypot(x - this.last.x, z - this.last.y) / dt;
       this.speed += (v - this.speed) * (1 - Math.exp(-12 * dt));
     }
+    const mdx = x - this.last.x;
+    const mdz = z - this.last.y;
+    if (this.hasPos && mdx * mdx + mdz * mdz > 1e-6) this.moveDir.set(mdx, mdz).normalize();
     this.last.set(x, z);
     this.hasPos = true;
     this.holder.position.set(x, 0, z);
     this.model.rotation.y = facing;
+
+    const standing = status === 'standing';
+    this.aura.visible = standing;
+    this.shell.visible = standing && this.stoneSkin;
+    if (this.shell.visible) this.shellMat.opacity = 0.22 + 0.1 * Math.sin(this.time * 5);
+    for (let i = 0; i < TRAIL; i++) {
+      const sp = this.trail[i]!;
+      sp.visible = standing && this.dashing;
+      if (sp.visible) sp.position.set(-this.moveDir.x * (i + 1) * 0.7, 1, -this.moveDir.y * (i + 1) * 0.7);
+    }
 
     if (status !== this.status) this.onStatus(status);
     this.status = status;
@@ -244,13 +347,28 @@ export class EnemyUnit {
   private readonly last = new THREE.Vector2();
   private speed = 0;
   private hasPos = false;
+  /** One small glow above the head for the most important status effect (fx bits). */
+  private readonly glow: THREE.Sprite;
+  private readonly glowMat: THREE.SpriteMaterial;
 
-  constructor(set: ModelSet) {
+  constructor(set: ModelSet, glow: THREE.Texture) {
     const u = makeUnit(set);
     this.holder = u.holder;
     this.model = u.model;
     this.anim = u.anim;
     this.baseScale = set.scale;
+    this.glowMat = new THREE.SpriteMaterial({
+      map: glow,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+      toneMapped: false,
+      opacity: 0.85,
+    });
+    this.glow = new THREE.Sprite(this.glowMat);
+    this.glow.scale.setScalar(0.7);
+    this.glow.position.y = 1.95;
+    this.glow.visible = false;
+    this.holder.add(this.glow);
     this.holder.visible = false;
   }
 
@@ -276,11 +394,13 @@ export class EnemyUnit {
   }
 
   hide(): void {
+    this.glow.visible = false;
     this.holder.visible = false;
     this.anim.stopAll();
   }
 
   die(): void {
+    this.glow.visible = false;
     this.dying = true;
     this.dieT = 0;
     this.anim.play(SKELETON_CLIP.death, { once: true, fade: 0.1 });
@@ -301,8 +421,15 @@ export class EnemyUnit {
     state: EnemyStateName,
     hp: number,
     scale: number,
+    fx = 0,
   ): void {
     if (this.dying) return;
+    const c = statusGlow(fx);
+    this.glow.visible = c !== null;
+    if (c !== null) {
+      this.glowMat.color.setHex(c);
+      this.glow.position.y = 1.95 * scale;
+    }
     if (this.hasPos && dt > 0) {
       const v = Math.hypot(x - this.last.x, z - this.last.y) / dt;
       this.speed += (v - this.speed) * (1 - Math.exp(-10 * dt));

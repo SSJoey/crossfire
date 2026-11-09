@@ -28,6 +28,12 @@ const HERO_CLIPS = [
   'Lie_Idle',
   'Lie_StandUp',
   'Death_A',
+  '1H_Melee_Attack_Chop',
+  'Dualwield_Melee_Attack_Chop',
+  '1H_Ranged_Shoot',
+  'Spellcast_Raise',
+  'Block',
+  'Dodge_Forward',
 ];
 const SKELETON_CLIPS = [
   'Spawn_Ground_Skeletons',
@@ -38,14 +44,43 @@ const SKELETON_CLIPS = [
   'Death_A',
 ];
 
-/** Stage 1a: Ember (Mage) for everyone, Skeleton Minion as the only enemy. */
+/**
+ * The four heroes (stage 1b) and the Skeleton Minion. Hero props must match `props` in
+ * shared/heroes.ts (tests/unit/tools/assets.test.ts checks it): body parts (named after
+ * `body`) always stay, and every prop not listed there is dropped.
+ */
 const JOBS = [
   // Ember holds only the staff: the KayKit Mage also carries a wand and two spellbooks.
   {
     out: 'Mage.glb',
     src: 'adventurers/Mage.glb',
     kind: 'character',
+    body: 'Mage_',
     dropParts: ['1H_Wand', 'Spellbook', 'Spellbook_open'],
+  },
+  // Bastion: one-handed sword and the round shield.
+  {
+    out: 'Knight.glb',
+    src: 'adventurers/Knight.glb',
+    kind: 'character',
+    body: 'Knight_',
+    dropParts: ['1H_Sword_Offhand', '2H_Sword', 'Badge_Shield', 'Rectangle_Shield', 'Spike_Shield'],
+  },
+  // Tide: the one-handed crossbow (the model is tinted blue at runtime).
+  {
+    out: 'Rogue_Hooded.glb',
+    src: 'adventurers/Rogue_Hooded.glb',
+    kind: 'character',
+    body: 'Rogue_',
+    dropParts: ['2H_Crossbow', 'Knife', 'Knife_Offhand', 'Throwable'],
+  },
+  // Gale: twin knives.
+  {
+    out: 'Rogue.glb',
+    src: 'adventurers/Rogue.glb',
+    kind: 'character',
+    body: 'Rogue_',
+    dropParts: ['1H_Crossbow', '2H_Crossbow', 'Throwable'],
   },
   { out: 'hero-anims.glb', src: 'adventurers/Mage.glb', kind: 'anims', clips: HERO_CLIPS },
   { out: 'Skeleton_Minion.glb', src: 'skeletons/Skeleton_Minion.glb', kind: 'character' },
@@ -102,9 +137,16 @@ async function main() {
       disposeOrphanAccessors(root);
       const dropped = job.dropParts ?? [];
       const droppedTriangles = dropParts(root, dropped, job.src);
+      // Props left on the model (not body parts), recorded for the props check.
+      const keptProps = job.body
+        ? root
+            .listNodes()
+            .filter((n) => n.getMesh() && !n.getName().startsWith(job.body))
+            .map((n) => n.getName())
+        : [];
       await doc.transform(prune(), dedup());
       // Body parts and bone-attached props become one skinned mesh: fewer draw calls per unit.
-      merge = { dropped, droppedTriangles, ...mergeSkinnedParts(doc, basename(job.out, '.glb')) };
+      merge = { dropped, droppedTriangles, keptProps, ...mergeSkinnedParts(doc, basename(job.out, '.glb')) };
       await doc.transform(prune(), weld());
     } else {
       const have = new Set(root.listAnimations().map((a) => a.getName()));

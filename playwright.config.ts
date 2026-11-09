@@ -18,7 +18,8 @@ export default defineConfig({
   },
   projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],
   webServer: {
-    command: `npm run build -w client && PORT=${PORT} BIND_HOST=127.0.0.1 LOG_DIR=${LOG_DIR} npm run server`,
+    // CROSSFIRE_DEBUG=1 so tests/e2e/heroes.spec.ts can try the debug hero switch (never in Docker).
+    command: `npm run build -w client && PORT=${PORT} BIND_HOST=127.0.0.1 LOG_DIR=${LOG_DIR} CROSSFIRE_DEBUG=1 npm run server`,
     url: `http://localhost:${PORT}/api/lan`,
     reuseExistingServer: false,
     timeout: 120_000,

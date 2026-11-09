@@ -529,3 +529,112 @@ No new packages. `@colyseus/sdk` 0.18.9 (still the latest) moved from the server
   - Tick p95 0.95 ms + patch 0.9 ms = **1.9 ms** (1a: 1.7 ms).
   - Bandwidth **42.7 kB/s** per client (1a: 42.5).
   - 810 kills (6.8/s against 4.8/s in the 1a run; Kindle's burns add damage).
+
+## 2026-11-09: Slice 1b.2 planning (answers from JCCJ)
+
+1. **Bolt colour: the element is synced.** `BoltState` gains `element` (`t.uint8()`, an index into `ELEMENT_IDS` in `shared/heroes.ts`), set from the bolt owner's hero at fire time. **Deviation:** a small server change in a client slice.
+2. **Clips that fit each weapon:**
+   - Ember: attack Spellcast_Shoot, Q Spellcast_Raise, E none (the blink is instant).
+   - Tide: attack 1H_Ranged_Shoot (crossbow), Q Spellcast_Raise, E Spellcast_Raise.
+   - Bastion: attack 1H_Melee_Attack_Chop, Q 1H_Melee_Attack_Chop, E Block.
+   - Gale: attack Dualwield_Melee_Attack_Chop, Q 1H_Melee_Attack_Chop, E Dodge_Forward.
+   - This differs from the look test, which used Spellcast_Shoot for Tide and the 1H chop for Gale.
+3. **Simple placeholder effects** (the real art is 1g): an element aura under each hero, zone discs in the element colour (look-test zone texture), the Q preview while Q is held, E effects (blink puffs, a stone shell while Stone skin is up, a heal ring, a dash trail) and small status glows on enemies (burning, slowed, stunned).
+4. **Lobby pick: four hero cards** (name, element and style, the Click/Q/E/passive names). Click to pick; the pick is highlighted. The lobby's player list shows each player's hero.
+
+### Defaults approved with the 1b.2 plan
+
+1. **Body parts stay, only props are dropped** (as with the Mage's hat and cape):
+   - Bastion keeps Knight_Helmet and Knight_Cape and drops 1H_Sword_Offhand, 2H_Sword and the Badge, Rectangle and Spike shields.
+   - Tide drops Knife, Knife_Offhand, 2H_Crossbow and Throwable.
+   - Gale drops 1H_Crossbow, 2H_Crossbow and Throwable.
+2. **Heights** (look test): Knight 1.85 m, Rogue and Rogue_Hooded 1.8 m. All four hero files share one 41-bone rig and the same 76 clips (checked), so one `hero-anims.glb` serves them all.
+3. **Tide tint:** Rogue_Hooded's own material colour is multiplied by 0xa9c6ff once at load.
+4. **Q and E keys:**
+   - Q release sends `cast: 'q'` in the next input; `qHeld` mirrors the key.
+   - An E press (not a held repeat) sends `cast: 'e'` once.
+   - Presses between two sends are latched. Q and E in the same tick go out as q, then e in the next input.
+   - A window blur or hidden tab while Q is held cancels the cast. Casts are sent only while standing.
+5. **E is sent only when the predictor thinks it's ready**, so a press during cooldown is never predicted and snapped back. Q isn't predicted; it is always sent and the server decides.
+6. **Another player's Flame step** clears that hero's snapshot buffer, so it jumps instead of sliding 6 m.
+7. **Attack, Q and E animations** come from the synced `act`/`actSeq`; they replace the "nearest hero to a new bolt" guess.
+8. **Reticle range and the client aim-assist ring per hero**: bolt range for ranged heroes; reach + `TUNING.melee.assistExtra` for melee (the server's rule).
+9. **HUD:** Click, Q and E slots with a cooldown overlay; the Q slot is armed (gold) while Q is held; the passive name is a small line under the hero name; the help panel gains Q and E, and "1–4 switch hero" only with `?debug=1`.
+10. **Playwright's server runs with `CROSSFIRE_DEBUG=1`** so the e2e test can try the debug switch. Production and Docker still never set it.
+11. **Element colours** (look test: fire 0xff6a2b, earth 0xc9934a, water 0x3fa7ff, air 0xbdf5ff) live in `shared/heroes.ts`: art, not tuning.
+12. Not in 1b.2: picks on the host page; bot hero variety (1e).
+
+## 2026-11-10: Slice 1b.2 build notes
+
+### Versions
+
+- No new packages. three 0.187.0 is still the latest (npm registry). `AnimationAction`, `SkeletonUtils.clone` and `Color.multiply` were checked in the installed types, and `t.uint8()` in the installed `@colyseus/schema` 5.0.43.
+
+### Implementation choices (not in the brief; for review)
+
+1. **Assets.**
+   - `tools/assets.mjs` writes `Knight.glb` (108 KB), `Rogue_Hooded.glb` (92 KB) and `Rogue.glb` (93 KB). Each is one skinned mesh with one draw call.
+   - `hero-anims.glb` grows from 8 clips to 14 (313 KB → 493 KB). The whole model set is 1.28 MB (the test's limit is 2 MB).
+   - Each character job names its body-part prefix (`Mage_`, `Knight_`, `Rogue_`), and the manifest records `keptProps`. The asset test checks those against `HEROES[id].props`.
+2. **`MODEL_FILES.heroes`** (per hero, derived from `HEROES[id].model`) replaces `MODEL_FILES.hero`. `HERO_ANIM` in `client/src/render/clips.ts` holds each hero's attack, Q and E clips.
+3. **Shared rule `assistRange(hero)`** (`shared/rules/abilities.ts`) gives bolt range for ranged heroes and reach + `melee.assistExtra` for melee. The server's `basicAttack` now uses it too, so the reticle and the server can't drift apart. Server behaviour is unchanged.
+4. **Predictor.**
+   - `setHero(id)` sets the hero.
+   - `applyInput(seq, moveX, moveZ, cast, aimX, aimZ)` mirrors the server's tick order: E cooldown, then the cast, then a dash or a walk.
+   - Each pending input stores its mode (walk, blink or dash tick, with the dash direction). On replay, a blink is recomputed from the replayed position; a dash tick reuses its stored direction (the server doesn't sync dash time or direction).
+   - `reconcile(…, eCd)` rebuilds the cooldown estimate from the server's `eCd` plus the pending inputs, and `eReady()` looks one tick ahead.
+   - `tests/integration/prediction-parity.test.ts` drives the real `World` and a `Predictor` with the same inputs. Positions agree to 1e-6 on every tick for all four heroes.
+5. **Input.**
+   - `CastLatch` (`client/src/input/cast.ts`): an E press is accepted once, until E is released (a key repeat without the repeat flag doesn't count).
+   - A press while not standing is dropped, not saved.
+   - Q and E are game keys now, so the browser default is prevented.
+6. **Effects (placeholders).**
+   - Element aura under each standing hero; a Stone skin shell (an earth-coloured translucent cylinder); a Gust dash trail (3 air glows behind the hero).
+   - Ground pulses (pool of 24): Flame step (fire, at both ends), Mending wave (water, out to 6 m), Stone skin (earth, out to the 6 m taunt radius; not in the plan, added as a cue for the taunt).
+   - Zone discs are pooled (cap 32). They fade in over 0.25 s and out over the last 0.5 s, counting down between patches.
+   - Enemy status glow: one sprite above the head, priority stunned (yellow 0xffe14a) > burning (fire) > slowed (water).
+7. **Animation speeds:**
+   - Attacks play at `max(2 for ranged / 1.8 for melee, clip ÷ attack interval)`, so fast attackers (Gale, 0.45 s) restart cleanly.
+   - Q plays at 1.6× (look test).
+   - The Gust dash clip is squeezed into the 0.25 s dash.
+8. **Another hero's Flame step** clears its snapshot buffer, so it jumps instead of sliding 6 m (approved default 6). The "nearest hero to a new bolt" cast-animation guess is gone; `act`/`actSeq` drives every animation.
+9. **HUD.**
+   - The Q and E slots get a cooldown shade (look-test style) and `data-cooling` for the tests. The Q slot is `armed` while Q is held.
+   - "Passive: …" sits under the HP text.
+   - **Layout fix found in the screenshots:** below 1180 px wide, the help panel covered the E slot. It now moves up above the bar (`bottom: 104px`), and it's still hidden below 760 px.
+10. **Lobby.** Four `button` cards (`#pick-<hero>`, `aria-pressed`), each with an element-colour left border. The player list shows each player's hero. All text still goes through `textContent`.
+11. **Debug view** (read-only, for Playwright) gains `me.hero`, `me.eCd`, `zones` and `qPreview`.
+
+### Changed existing tests (mechanical)
+
+- `tests/unit/tools/assets.test.ts`: checks all four hero files where it checked only `MODEL_FILES.hero` (now `MODEL_FILES.heroes.ember`).
+- The old prediction tests are unchanged (the new `applyInput` arguments are optional).
+
+### Test-first record
+
+- **Written first and seen failing:**
+  - 17 failed: 13 prediction tests, 4 parity tests (one per hero), and 1 bolt-element test.
+  - Three whole test files couldn't load (`client/heroes`, the input additions, the asset test), because the modules they import didn't exist yet.
+- **Corrected before any code:** the blink-replay test expected x = 9.7 after the blink. A blink from x = 9.7 toward (10, 30) moves x a little too, so the test now computes the expected point with `blinkTarget`.
+- **Fixed while writing:** the bolt-element integration test sent inputs every 10 ms, above the 60/s rate limit. It now sends at 20 Hz.
+- **Playwright, first run:** "with ?debug=1, key 3 switches to Tide" failed (still Ember after 1 s).
+  - A real server switched correctly when driven by the SDK.
+  - The same browser steps, run alone, worked and showed the debug frame being sent.
+  - Cause: load. Earlier tests' pages were still open and rendering, and the poll allowed only 1 s.
+  - Fix: `heroes.spec.ts` closes its pages after each test, and the poll allows 3 s. The full suite then passed twice in a row.
+
+### Checks (2026-11-10)
+
+- **Tests:** 537 unit, integration and regression tests pass (499 before) and 9 Playwright tests pass (4 new). Lint and typecheck are clean.
+- **Server smoke run** (port 2599): lobby → running → ended after 18.0 s.
+- **Load test,** 2 minutes, 8 bots, 120 enemies: PASSED. Tick 1 ms + patch 0.9 ms = **1.9 ms**, and **42.7 kB/s** per client (same as 1b.1), so the bolt `element` byte doesn't show.
+- **Screenshots** (headless Chrome, scripted):
+  - the lobby cards and the HUD for each hero;
+  - Tidal pool and Quake slam discs, plus a Cyclone disc, in their element colours;
+  - the Mending wave ring, Ember's blink, and Bastion's stone shell;
+  - Gale's dash, measured at exactly 7.00 m.
+
+### For JCCJ's review
+
+- **Tide's tint looks teal-green, not blue.** A light-blue multiply over the Rogue's green atlas comes out teal. It is the look-test method (default 10 of the 1b plan), but the result doesn't read as "water" on screen. Options: a stronger tint, a tint on the cloth only (needs a texture or mask pass), or the paid KayKit model (parked). Not changed: your call.
+- **Play it by hand** (`npm run dev`, one tab per hero) and check how it feels: the dash and blink, the zone readability, and the animation speeds.

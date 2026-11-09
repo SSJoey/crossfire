@@ -1,3 +1,4 @@
+import type { Element, HeroId } from '@crossfire/shared/heroes';
 import type { HeroStatus, Phase, WaveState } from '@crossfire/shared/types';
 
 /**
@@ -15,6 +16,8 @@ export interface PlayerView {
   ready: boolean;
   /** Added from the host page. */
   bot: boolean;
+  /** Picked hero (stage 1b). */
+  hero: HeroId;
 }
 
 export interface HeroView {
@@ -28,6 +31,15 @@ export interface HeroView {
   bleedOut: number;
   reviveProgress: number;
   lastSeq: number;
+  hero: HeroId;
+  /** Q and E cooldowns left (s). */
+  qCd: number;
+  eCd: number;
+  stoneSkin: boolean;
+  dashing: boolean;
+  /** What the hero last did ('attack', 'q', 'e' or ''), with a counter that changes each time. */
+  act: string;
+  actSeq: number;
 }
 
 export type EnemyStateName = 'spawning' | 'moving' | 'winding';
@@ -41,6 +53,8 @@ export interface EnemyView {
   level: number;
   scale: number;
   state: EnemyStateName;
+  /** ENEMY_FX bits. */
+  fx: number;
 }
 
 export interface BoltView {
@@ -48,6 +62,16 @@ export interface BoltView {
   z: number;
   dirX: number;
   dirZ: number;
+  /** `elementIndex` of the firing hero's element. */
+  element: number;
+}
+
+export interface ZoneView {
+  x: number;
+  z: number;
+  element: Element;
+  /** Seconds left. */
+  remaining: number;
 }
 
 export interface RoomState {
@@ -59,4 +83,5 @@ export interface RoomState {
   heroes: SyncMap<HeroView>;
   enemies: SyncMap<EnemyView>;
   bolts: SyncMap<BoltView>;
+  zones: SyncMap<ZoneView>;
 }

@@ -7,7 +7,7 @@ import {
   Room,
   ServerError,
 } from '@colyseus/core';
-import { isHeroId } from '@crossfire/shared/heroes';
+import { elementIndex, HEROES, isHeroId } from '@crossfire/shared/heroes';
 import { strongestSlow } from '@crossfire/shared/rules/abilities';
 import { loadTuning } from '@crossfire/shared/rules/loadtest';
 import {
@@ -788,6 +788,7 @@ export class HoldRoom extends Room<{ state: HoldState }> {
         s = new BoltState();
         s.dirX = p.dirX;
         s.dirZ = p.dirZ;
+        s.element = elementIndex(HEROES[p.kit].element);
         this.boltStates.set(p.uid, s);
         this.state.bolts.set(String(p.uid), s);
       }

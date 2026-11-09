@@ -4,6 +4,7 @@ import { NodeIO } from '@gltf-transform/core';
 import { ALL_EXTENSIONS } from '@gltf-transform/extensions';
 import { MeshoptDecoder } from 'meshoptimizer';
 import { beforeAll, describe, expect, it } from 'vitest';
+import { HEROES, HERO_IDS } from '@crossfire/shared/heroes';
 import { HERO_CLIPS, MODEL_FILES, SKELETON_CLIPS } from '../../../client/src/render/clips';
 
 /**
@@ -11,6 +12,11 @@ import { HERO_CLIPS, MODEL_FILES, SKELETON_CLIPS } from '../../../client/src/ren
  * fresh clone without the git-ignored KayKit sources. The manifest records the source sizes.
  */
 const OUT = join(import.meta.dirname, '../../../client/public/models');
+const HERO_FILES = HERO_IDS.map((id) => MODEL_FILES.heroes[id]);
+/** Every character file: the four heroes and the minion. */
+const CHARACTERS = [...HERO_FILES, MODEL_FILES.minion];
+/** Every file the client loads. */
+const ALL_FILES = [...CHARACTERS, MODEL_FILES.heroAnims, MODEL_FILES.skeletonAnims];
 
 type Box = [number[], number[]];
 
@@ -26,6 +32,8 @@ interface Manifest {
       merge?: {
         /** Parts removed before merging (unused props), with their triangle count. */
         dropped: string[];
+        /** Props (not body parts) that stay on the model. */
+        keptProps: string[];
         droppedTriangles: number;
         partsBefore: number;
         drawCallsAfter: number;
@@ -56,11 +64,11 @@ async function read(file: string) {
 
 describe('KayKit asset pipeline output', () => {
   it('writes every model file the client loads', () => {
-    for (const f of Object.values(MODEL_FILES)) expect(existsSync(join(OUT, f)), f).toBe(true);
+    for (const f of ALL_FILES) expect(existsSync(join(OUT, f)), f).toBe(true);
   });
 
   it('character files hold mesh and skeleton but no clips', async () => {
-    for (const f of [MODEL_FILES.hero, MODEL_FILES.minion]) {
+    for (const f of CHARACTERS) {
       const root = (await read(f)).getRoot();
       expect(root.listMeshes().length, f).toBeGreaterThan(0);
       expect(root.listSkins().length, f).toBe(1);
@@ -70,7 +78,7 @@ describe('KayKit asset pipeline output', () => {
 
   it('each character is one skinned mesh with one draw call per material', async () => {
     const limits: [string, number][] = [
-      [MODEL_FILES.hero, 1],
+      ...HERO_FILES.map((f): [string, number] => [f, 1]),
       [MODEL_FILES.minion, 2],
     ];
     for (const [f, maxDrawCalls] of limits) {
@@ -87,7 +95,7 @@ describe('KayKit asset pipeline output', () => {
   });
 
   it('the merge keeps every triangle and the same bind-pose shape', () => {
-    for (const f of [MODEL_FILES.hero, MODEL_FILES.minion]) {
+    for (const f of CHARACTERS) {
       const m = manifest.models[f]!.merge!;
       expect(m.partsBefore, f).toBeGreaterThan(m.drawCallsAfter);
       expect(m.trianglesAfter, f).toBe(m.trianglesBefore);
@@ -98,7 +106,7 @@ describe('KayKit asset pipeline output', () => {
   });
 
   it('Ember holds only the staff: the wand and both spellbooks are dropped', () => {
-    const m = manifest.models[MODEL_FILES.hero]!.merge!;
+    const m = manifest.models[MODEL_FILES.heroes.ember]!.merge!;
     expect([...m.dropped].sort()).toEqual(['1H_Wand', 'Spellbook', 'Spellbook_open']);
     expect(m.droppedTriangles).toBeGreaterThan(0);
     // The staff, hat and cape stay: 12 parts minus the 3 dropped props.
@@ -106,8 +114,25 @@ describe('KayKit asset pipeline output', () => {
     expect(manifest.models[MODEL_FILES.minion]!.merge!.dropped).toEqual([]);
   });
 
+  it('each hero keeps exactly its props from shared/heroes.ts (NOTES.md 2026-11-09, 1b.2 default 1)', () => {
+    const dropped: Record<string, string[]> = {
+      ember: ['1H_Wand', 'Spellbook', 'Spellbook_open'],
+      bastion: ['1H_Sword_Offhand', '2H_Sword', 'Badge_Shield', 'Rectangle_Shield', 'Spike_Shield'],
+      tide: ['2H_Crossbow', 'Knife', 'Knife_Offhand', 'Throwable'],
+      gale: ['1H_Crossbow', '2H_Crossbow', 'Throwable'],
+    };
+    for (const id of HERO_IDS) {
+      const m = manifest.models[MODEL_FILES.heroes[id]]!;
+      expect(m.source, id).toBe(`adventurers/${HEROES[id].model}.glb`);
+      expect([...m.merge!.dropped].sort(), id).toEqual([...dropped[id]!].sort());
+      expect(m.merge!.droppedTriangles, id).toBeGreaterThan(0);
+      // Kept props are recorded by the pipeline and must be the hero's props, nothing more.
+      expect([...m.merge!.keptProps].sort(), id).toEqual([...HEROES[id].props].sort());
+    }
+  });
+
   it('every vertex is bound to a real joint with weights summing to 1', async () => {
-    for (const f of [MODEL_FILES.hero, MODEL_FILES.minion]) {
+    for (const f of CHARACTERS) {
       const root = (await read(f)).getRoot();
       const joints = root.listSkins()[0]!.listJoints().length;
       const prim = root.listMeshes()[0]!.listPrimitives()[0]!;
@@ -149,7 +174,7 @@ describe('KayKit asset pipeline output', () => {
       expect(bytes, file).toBe(m.bytes);
       expect(bytes, file).toBeLessThan(m.sourceBytes);
     }
-    const used = (await read(MODEL_FILES.hero))
+    const used = (await read(MODEL_FILES.heroes.ember))
       .getRoot()
       .listExtensionsUsed()
       .map((e) => e.extensionName);
@@ -157,7 +182,7 @@ describe('KayKit asset pipeline output', () => {
   });
 
   it('the whole model set stays small enough for a quick join on Wi-Fi', () => {
-    const total = Object.values(MODEL_FILES).reduce((n, f) => n + statSync(join(OUT, f)).size, 0);
+    const total = ALL_FILES.reduce((n, f) => n + statSync(join(OUT, f)).size, 0);
     expect(total).toBeLessThan(2_000_000);
   });
 });

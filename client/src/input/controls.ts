@@ -1,3 +1,5 @@
+import type { HeroId } from '@crossfire/shared/heroes';
+import { CastLatch, debugHeroKey } from './cast';
 import { isGameKey, KeyState } from './keys';
 
 /**
@@ -6,12 +8,19 @@ import { isGameKey, KeyState } from './keys';
  */
 export class Controls {
   readonly keys = new KeyState();
+  /** Q and E casts. */
+  readonly cast = new CastLatch();
+  /** Called for 1–4 in debug mode (?debug=1). */
+  onDebugHero: ((hero: HeroId) => void) | null = null;
   /** Mouse position in normalised device coordinates (−1..1). */
   readonly ndc = { x: 0, y: 0 };
   attackHeld = false;
   private readonly off: (() => void)[] = [];
 
-  constructor(private readonly canvas: HTMLCanvasElement) {
+  constructor(
+    private readonly canvas: HTMLCanvasElement,
+    private readonly debug = false,
+  ) {
     const on = <K extends keyof WindowEventMap>(
       target: Window | HTMLElement | Document,
       type: K | string,
@@ -24,8 +33,14 @@ export class Controls {
     on(window, 'keydown', (e: KeyboardEvent) => {
       if (isGameKey(e.code)) e.preventDefault();
       this.keys.down(e.code);
+      this.cast.keyDown(e.code, e.repeat);
+      const hero = e.repeat ? null : debugHeroKey(e.code, this.debug);
+      if (hero) this.onDebugHero?.(hero);
     });
-    on(window, 'keyup', (e: KeyboardEvent) => this.keys.up(e.code));
+    on(window, 'keyup', (e: KeyboardEvent) => {
+      this.keys.up(e.code);
+      this.cast.keyUp(e.code);
+    });
     on(window, 'blur', () => this.releaseAll());
     on(document, 'visibilitychange', () => {
       if (document.hidden) this.releaseAll();
@@ -52,6 +67,7 @@ export class Controls {
 
   releaseAll(): void {
     this.keys.clear();
+    this.cast.cancel();
     this.attackHeld = false;
   }
 

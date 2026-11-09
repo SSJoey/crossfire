@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { TUNING } from '@crossfire/shared/tuning';
 import { clampToMap, rayToGround } from '../../../client/src/input/aim';
-import { InputSeq, KeyState } from '../../../client/src/input/keys';
+import { CastLatch, debugEnabled, debugHeroKey } from '../../../client/src/input/cast';
+import { InputSeq, isGameKey, KeyState } from '../../../client/src/input/keys';
 
 const move = { x: 0, z: 0 };
 
@@ -96,5 +97,100 @@ describe('aim on the ground', () => {
     const inside = { x: 1, z: 2 };
     clampToMap(inside, TUNING.ring.mapRadius);
     expect(inside).toEqual({ x: 1, z: 2 });
+  });
+});
+
+describe('Q and E casts (1b.2)', () => {
+  it('a Q release gives exactly one cast "q"; qHeld follows the key', () => {
+    const c = new CastLatch();
+    c.keyDown('KeyQ', false);
+    expect(c.qHeld).toBe(true);
+    expect(c.take(true, true)).toBe('none');
+    c.keyUp('KeyQ');
+    expect(c.qHeld).toBe(false);
+    expect(c.take(true, true)).toBe('q');
+    expect(c.take(true, true)).toBe('none');
+  });
+
+  it('an E press gives one cast "e"; holding E does not repeat it', () => {
+    const c = new CastLatch();
+    c.keyDown('KeyE', false);
+    c.keyDown('KeyE', true); // key repeat
+    c.keyDown('KeyE', false); // some systems repeat without the flag
+    expect(c.take(true, true)).toBe('e');
+    expect(c.take(true, true)).toBe('none');
+    c.keyUp('KeyE');
+    c.keyDown('KeyE', false);
+    expect(c.take(true, true)).toBe('e');
+  });
+
+  it('a tap between two sends is not lost', () => {
+    const c = new CastLatch();
+    c.keyDown('KeyE', false);
+    c.keyUp('KeyE');
+    c.keyDown('KeyQ', false);
+    c.keyUp('KeyQ');
+    expect(c.qHeld).toBe(false);
+    expect(c.take(true, true)).toBe('q');
+    expect(c.take(true, true)).toBe('e');
+    expect(c.take(true, true)).toBe('none');
+  });
+
+  it('Q and E in the same tick go out as q, then e', () => {
+    const c = new CastLatch();
+    c.keyDown('KeyQ', false);
+    c.keyDown('KeyE', false);
+    c.keyUp('KeyQ');
+    expect(c.take(true, true)).toBe('q');
+    expect(c.take(true, true)).toBe('e');
+  });
+
+  it('a window blur while Q is held cancels the cast', () => {
+    const c = new CastLatch();
+    c.keyDown('KeyQ', false);
+    c.cancel();
+    expect(c.qHeld).toBe(false);
+    c.keyUp('KeyQ');
+    expect(c.take(true, true)).toBe('none');
+  });
+
+  it('nothing is cast while not standing, and the press is dropped, not saved', () => {
+    const c = new CastLatch();
+    c.keyDown('KeyQ', false);
+    c.keyUp('KeyQ');
+    c.keyDown('KeyE', false);
+    expect(c.take(false, true)).toBe('none');
+    expect(c.take(true, true)).toBe('none');
+  });
+
+  it('an E press while the predictor says E is not ready is dropped', () => {
+    const c = new CastLatch();
+    c.keyDown('KeyE', false);
+    expect(c.take(true, false)).toBe('none');
+    expect(c.take(true, true)).toBe('none');
+  });
+
+  it('Q and E count as game keys (no browser default)', () => {
+    expect(isGameKey('KeyQ')).toBe(true);
+    expect(isGameKey('KeyE')).toBe(true);
+  });
+});
+
+describe('debug hero switch keys (1b.2)', () => {
+  it('1 to 4 pick Ember, Bastion, Tide and Gale, only in debug mode', () => {
+    expect(debugHeroKey('Digit1', true)).toBe('ember');
+    expect(debugHeroKey('Digit2', true)).toBe('bastion');
+    expect(debugHeroKey('Digit3', true)).toBe('tide');
+    expect(debugHeroKey('Digit4', true)).toBe('gale');
+    expect(debugHeroKey('Digit5', true)).toBeNull();
+    expect(debugHeroKey('Digit1', false)).toBeNull();
+  });
+
+  it('debug mode needs ?debug=1 exactly', () => {
+    expect(debugEnabled('?debug=1')).toBe(true);
+    expect(debugEnabled('?code=ABCD&debug=1')).toBe(true);
+    expect(debugEnabled('')).toBe(false);
+    expect(debugEnabled('?debug=0')).toBe(false);
+    expect(debugEnabled('?debug=true')).toBe(false);
   });
 });

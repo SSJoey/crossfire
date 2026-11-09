@@ -1,3 +1,4 @@
+import { ELEMENT_COLOR, HEROES, HERO_IDS, isHeroId, type HeroId } from '@crossfire/shared/heroes';
 import { TUNING } from '@crossfire/shared/tuning';
 import { MSG, SERVER_MSG, type RunEndedMessage } from '@crossfire/shared/types';
 import { debugView } from '../debug';
@@ -7,6 +8,7 @@ import { joinAsPlayer, type GameRoom } from '../net/connection';
 import { classifyJoinError, closeMessage, normaliseRoomCode, parseRoomCode } from '../net/joinflow';
 import type { RoomState } from '../net/state';
 import { loadModels, type Models } from '../render/assets';
+import { heroText } from './abilities';
 import { isTier, resolveTier, saveTier, TIERS, type Store, type Tier } from '../render/tiers';
 
 function storage(): Store | undefined {
@@ -70,6 +72,7 @@ export class JoinApp {
   private readonly lobbyCount = el('div', { className: 'muted' });
   private readonly readyBtn = el('button', { id: 'lobby-ready', className: 'primary', text: "I'm ready" });
   private readonly lobbyLoad = el('div', { className: 'muted' });
+  private readonly heroCards = new Map<HeroId, HTMLButtonElement>();
   private readonly lobbyScreen: HTMLElement;
 
   // End screen
@@ -129,14 +132,34 @@ export class JoinApp {
       const p = this.room?.state.players.get(this.room.sessionId);
       this.room?.send(MSG.ready, { ready: !p?.ready });
     });
+    const heroes = el('div', { id: 'lobby-heroes', className: 'heroes' });
+    for (const id of HERO_IDS) {
+      const t = heroText(id);
+      const card = el(
+        'button',
+        { id: `pick-${id}`, className: 'hero-card', attrs: { type: 'button', 'aria-pressed': 'false' } },
+        el('span', { className: 'hn', text: t.name }),
+        el('span', { className: 'hs', text: t.sub }),
+        el('span', { text: `Click: ${t.basic}` }),
+        el('span', { text: `Q: ${t.q}` }),
+        el('span', { text: `E: ${t.e}` }),
+        el('span', { className: 'hs', text: `Passive: ${t.passive}` }),
+      );
+      card.style.setProperty('--el', `#${ELEMENT_COLOR[HEROES[id].element].toString(16).padStart(6, '0')}`);
+      card.addEventListener('click', () => this.room?.send(MSG.pick, { hero: id }));
+      this.heroCards.set(id, card);
+      heroes.append(card);
+    }
     this.lobbyScreen = el(
       'div',
       { className: 'screen' },
       el(
         'div',
-        { className: 'card' },
+        { className: 'card wide' },
         el('div', { className: 'eyebrow', text: 'Lobby' }),
         el('h1', { text: 'Get ready' }),
+        el('div', { className: 'k', text: 'Pick your hero' }),
+        heroes,
         this.lobbyCount,
         this.lobbyList,
         el('div', { className: 'row' }, this.readyBtn),
@@ -236,7 +259,7 @@ export class JoinApp {
     // Lobby list: rebuilt only when it changes (names as text only).
     const names: string[] = [];
     s.players.forEach((p, id) =>
-      names.push(`${id === this.room?.sessionId ? '1' : '0'}${p.ready ? '1' : '0'}${p.name}`),
+      names.push(`${id === this.room?.sessionId ? '1' : '0'}${p.ready ? '1' : '0'}${p.hero}:${p.name}`),
     );
     const key = names.join('\n');
     if (this.lobbyList.dataset.key !== key) {
@@ -249,6 +272,7 @@ export class JoinApp {
             {},
             el('span', { className: 'nm', text: p.name }),
             id === this.room?.sessionId ? el('span', { className: 'k', text: 'you' }) : null,
+            el('span', { className: 'hero', text: isHeroId(p.hero) ? HEROES[p.hero].name : '' }),
             el('span', { className: `rd${p.ready ? ' on' : ''}`, text: p.ready ? 'Ready' : 'Not ready' }),
           ),
         );
@@ -256,6 +280,7 @@ export class JoinApp {
       setText(this.lobbyCount, `${s.players.size} of ${TUNING.lobby.maxPlayers} players`);
       const me = this.room ? s.players.get(this.room.sessionId) : undefined;
       setText(this.readyBtn, me?.ready ? 'Not ready' : "I'm ready");
+      for (const [id, card] of this.heroCards) card.setAttribute('aria-pressed', String(me?.hero === id));
       this.readyBtn.classList.toggle('primary', !me?.ready);
     }
 

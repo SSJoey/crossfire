@@ -1,11 +1,14 @@
 import * as THREE from 'three';
+import { ELEMENT_COLOR, type Element } from '@crossfire/shared/heroes';
+import { TUNING } from '@crossfire/shared/tuning';
 
-const FIRE = 0xff6a2b;
+const WHITE = new THREE.Color(0xffffff);
 
-/** A fire bolt: an additive glow sprite with a short trail. Pooled. */
+/** A bolt: an additive glow sprite with a short trail in its element colour. Pooled. */
 export class BoltSprite {
   readonly group = new THREE.Group();
   private readonly trail: THREE.Sprite;
+  private readonly core: THREE.Sprite;
 
   constructor(glow: THREE.Texture) {
     const core = new THREE.Sprite(
@@ -21,7 +24,7 @@ export class BoltSprite {
     this.trail = new THREE.Sprite(
       new THREE.SpriteMaterial({
         map: glow,
-        color: FIRE,
+        color: ELEMENT_COLOR.fire,
         blending: THREE.AdditiveBlending,
         depthWrite: false,
         toneMapped: false,
@@ -29,8 +32,15 @@ export class BoltSprite {
       }),
     );
     this.trail.scale.setScalar(0.9);
+    this.core = core;
     this.group.add(core, this.trail);
     this.group.visible = false;
+  }
+
+  /** Colours a newly shown bolt: trail in the element colour, a paler core. */
+  setElement(el: Element): void {
+    this.trail.material.color.setHex(ELEMENT_COLOR[el]);
+    this.core.material.color.setHex(ELEMENT_COLOR[el]).lerp(WHITE, 0.6);
   }
 
   place(x: number, z: number, dirX: number, dirZ: number): void {
@@ -132,5 +142,140 @@ export class Reticle {
 
   setVisible(on: boolean): void {
     this.group.visible = on;
+  }
+}
+
+const zoneGeo = new THREE.CircleGeometry(TUNING.zones.radius, 48);
+
+function zoneMat(tex: THREE.Texture): THREE.MeshBasicMaterial {
+  return new THREE.MeshBasicMaterial({
+    map: tex,
+    transparent: true,
+    opacity: 0,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false,
+    toneMapped: false,
+  });
+}
+
+/** A Q zone on the ground in its element colour (look test). Pooled. */
+export class ZoneDisc {
+  readonly mesh: THREE.Mesh;
+  private readonly mat: THREE.MeshBasicMaterial;
+
+  constructor(tex: THREE.Texture, layer: number) {
+    this.mat = zoneMat(tex);
+    this.mesh = new THREE.Mesh(zoneGeo, this.mat);
+    this.mesh.rotation.x = -Math.PI / 2;
+    // A tiny height step per pooled disc keeps overlapping zones from flickering.
+    this.mesh.position.y = 0.05 + (layer % 32) * 0.002;
+    this.mesh.visible = false;
+  }
+
+  place(x: number, z: number, el: Element, opacity: number): void {
+    this.mesh.position.x = x;
+    this.mesh.position.z = z;
+    this.mat.color.setHex(ELEMENT_COLOR[el]);
+    this.mat.opacity = opacity * 0.9;
+  }
+}
+
+/** Where a held Q will land (clamped to cast range); dim while Q is cooling down. */
+export class ZonePreview {
+  readonly mesh: THREE.Mesh;
+  private readonly mat: THREE.MeshBasicMaterial;
+
+  constructor(tex: THREE.Texture) {
+    this.mat = zoneMat(tex);
+    this.mesh = new THREE.Mesh(zoneGeo, this.mat);
+    this.mesh.rotation.x = -Math.PI / 2;
+    this.mesh.position.y = 0.06;
+    this.mesh.visible = false;
+  }
+
+  get visible(): boolean {
+    return this.mesh.visible;
+  }
+
+  show(x: number, z: number, el: Element, ready: boolean): void {
+    this.mesh.visible = true;
+    this.mesh.position.x = x;
+    this.mesh.position.z = z;
+    this.mat.color.setHex(ELEMENT_COLOR[el]);
+    this.mat.opacity = ready ? 0.6 : 0.2;
+  }
+
+  hide(): void {
+    this.mesh.visible = false;
+  }
+}
+
+interface Pulse {
+  mesh: THREE.Mesh;
+  mat: THREE.MeshBasicMaterial;
+  t: number;
+  life: number;
+  r0: number;
+  r1: number;
+}
+
+const pulseGeo = new THREE.RingGeometry(0.85, 1, 48);
+
+/**
+ * Expanding, fading ground rings for one-shot effects (blink puffs, Mending wave).
+ * A fixed pool; the oldest ring is reused when all are busy.
+ */
+export class Pulses {
+  readonly group = new THREE.Group();
+  private readonly items: Pulse[] = [];
+  private next = 0;
+
+  constructor(count = 24) {
+    for (let i = 0; i < count; i++) {
+      const mat = new THREE.MeshBasicMaterial({
+        transparent: true,
+        opacity: 0,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+        toneMapped: false,
+      });
+      const mesh = new THREE.Mesh(pulseGeo, mat);
+      mesh.rotation.x = -Math.PI / 2;
+      mesh.position.y = 0.07;
+      mesh.visible = false;
+      this.group.add(mesh);
+      this.items.push({ mesh, mat, t: 0, life: 0, r0: 0, r1: 0 });
+    }
+  }
+
+  fire(x: number, z: number, color: number, r0: number, r1: number, life: number): void {
+    const p = this.items[this.next]!;
+    this.next = (this.next + 1) % this.items.length;
+    p.mesh.position.x = x;
+    p.mesh.position.z = z;
+    p.mat.color.setHex(color);
+    p.t = 0;
+    p.life = life;
+    p.r0 = r0;
+    p.r1 = r1;
+    p.mesh.visible = true;
+  }
+
+  update(dt: number): void {
+    for (const p of this.items) {
+      if (!p.mesh.visible) continue;
+      p.t += dt;
+      const k = p.t / p.life;
+      if (k >= 1) {
+        p.mesh.visible = false;
+        continue;
+      }
+      p.mesh.scale.setScalar(p.r0 + (p.r1 - p.r0) * (1 - (1 - k) * (1 - k)));
+      p.mat.opacity = 0.9 * (1 - k);
+    }
+  }
+
+  clear(): void {
+    for (const p of this.items) p.mesh.visible = false;
   }
 }

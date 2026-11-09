@@ -67,6 +67,8 @@ export const BoltState = schema(
     z: t.float32().default(0),
     dirX: t.float32().default(0),
     dirZ: t.float32().default(0),
+    /** The firing hero's element, as `elementIndex` (stage 1b.2: bolt colour). */
+    element: t.uint8().default(0),
   },
   'BoltState',
 );

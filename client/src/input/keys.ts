@@ -5,6 +5,8 @@ const USED = new Set([
   'KeyS',
   'KeyD',
   'KeyF',
+  'KeyQ',
+  'KeyE',
   'ArrowUp',
   'ArrowDown',
   'ArrowLeft',

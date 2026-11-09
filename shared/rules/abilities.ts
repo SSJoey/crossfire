@@ -1,4 +1,4 @@
-import type { HeroId } from '../heroes';
+import { heroKit, type HeroId } from '../heroes';
 import { TUNING, type Tuning } from '../tuning';
 import type { HeroStatus } from '../types';
 import { constrainToArena, type Pos } from './movement';
@@ -48,6 +48,15 @@ export function dashStep(
   p.x += dirX * speed * dt;
   p.z += dirZ * speed * dt;
   constrainToArena(p, ring);
+}
+
+/**
+ * How far a hero's basic attack looks for an aim-assist target: bolt range for ranged
+ * heroes, reach + `melee.assistExtra` for melee heroes. Used by the server and the reticle.
+ */
+export function assistRange(hero: HeroId, t: Tuning = TUNING): number {
+  const kit = heroKit(hero, 1, t);
+  return 'bolt' in kit ? kit.bolt.range : kit.melee.reach + t.melee.assistExtra;
 }
 
 /** Damage a hero actually takes: Bastion's Steadfast always, Stone skin while it lasts. */

@@ -108,3 +108,30 @@ export function ringGlowTexture(): THREE.CanvasTexture {
     false,
   );
 }
+
+/** Q zone disc: a faint centre, a bright rim and dashed inner arcs (look test). */
+export function zoneTexture(): THREE.CanvasTexture {
+  return canvasTexture(
+    256,
+    (g, s) => {
+      const c = s / 2;
+      const gr = g.createRadialGradient(c, c, 0, c, c, c);
+      gr.addColorStop(0, 'rgba(255,255,255,0.10)');
+      gr.addColorStop(0.62, 'rgba(255,255,255,0.32)');
+      gr.addColorStop(0.86, 'rgba(255,255,255,0.95)');
+      gr.addColorStop(0.92, 'rgba(255,255,255,0.5)');
+      gr.addColorStop(1, 'rgba(255,255,255,0)');
+      g.fillStyle = gr;
+      g.fillRect(0, 0, s, s);
+      g.strokeStyle = 'rgba(255,255,255,0.55)';
+      g.lineWidth = 3;
+      for (let i = 0; i < 10; i++) {
+        const a = (i / 10) * Math.PI * 2;
+        g.beginPath();
+        g.arc(c, c, c * 0.72, a, a + 0.32);
+        g.stroke();
+      }
+    },
+    false,
+  );
+}
