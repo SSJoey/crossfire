@@ -773,6 +773,7 @@ The open points from "Pause added as slice 1b.3", settled:
 - **Server smoke run** (port 2599): lobby → running → ended after 18.0 s.
 - **Load test,** 2 minutes, 8 bots, 120 enemies: PASSED. Tick 1 ms + patch 0.9 ms = **1.9 ms**; **42.9 kB/s** per client (1b.2: 1.9 ms, 42.7 kB/s).
 - **Screenshots** (headless Chrome, scripted): the paused game (Tide), the host page while paused, and the cooldown hint.
+- **Docker check passed** (`bash tools/docker-check.sh`, all checks, run by JCCJ), after the 1b.3 commit. Its scripted run is `logs/2026-11-10T03-15-07.810Z_DNHE.jsonl`; its `end` line has `pausedSec`, so the container ran the 1b.3 build.
 
 ### For JCCJ's review
 
